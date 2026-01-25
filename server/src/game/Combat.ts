@@ -193,6 +193,25 @@ export function processAbilityCast(
         isStealthAttack,
         killed: targetDied
       });
+
+      // Frostbolt applies a slow debuff to enemies
+      if (abilityId === 'mage_frostbolt' && 'debuffs' in targetEntity && targetEntity.isAlive) {
+        const slowDuration = 3 + rank; // 4/5/6/7/8 seconds at ranks 1-5
+        const slowDebuff = {
+          id: `frostbolt_slow_${Date.now()}_${targetEntity.id}`,
+          sourceId: caster.id,
+          abilityId: 'mage_frostbolt',
+          name: 'Frostbolt Slow',
+          damagePerTick: 0, // No damage, just slow
+          tickInterval: 1,
+          remainingDuration: slowDuration,
+          lastTickTime: Date.now() / 1000
+        };
+        // Remove existing slow and add new one
+        targetEntity.debuffs = targetEntity.debuffs.filter(d => d.abilityId !== 'mage_frostbolt');
+        targetEntity.debuffs.push(slowDebuff);
+        console.log(`[DEBUG] Frostbolt slowed ${targetEntity.name} for ${slowDuration}s`);
+      }
       break;
     }
 
@@ -267,7 +286,15 @@ export function processAbilityCast(
         maxDuration: duration,
         isDebuff: false,
         stacks: abilityId === 'shaman_ancestral' ? (2 + rank) : undefined, // Ancestral Spirit: 3/4/5/6/7 charges
-        rank // Store rank for effects that scale (like Bloodlust healing)
+        rank, // Store rank for effects that scale (like Bloodlust healing)
+        // Power Word: Shield - absorbs damage based on baseHeal and spell power
+        shieldAmount: abilityId === 'priest_shield'
+          ? Math.round((ability.baseHeal ?? 35) * (1 + (rank - 1) * 0.15) + caster.stats.spellPower * 0.5)
+          : undefined,
+        // Aspect of the Hawk - increases attack power
+        statModifiers: abilityId === 'hunter_aspect'
+          ? { attackPower: Math.round(10 + rank * 5 + caster.stats.attackPower * 0.2) } // +10/15/20/25/30 + 20% of AP
+          : undefined
       };
 
       // Remove existing buff of same ability if present (refresh duration)
@@ -485,6 +512,13 @@ export function processEnemyAttack(
     return { events: [], targetDied: false };
   }
 
+  // Check for Ice Block - immune to ALL damage
+  const hasIceBlock = target.buffs.some(b => b.icon === 'mage_iceblock');
+  if (hasIceBlock) {
+    console.log(`[DEBUG] Ice Block made ${target.name} immune to attack from ${enemy.name}`);
+    return { events: [], targetDied: false };
+  }
+
   // Check for Blessing of Protection - immune to physical damage
   const hasBlessing = target.buffs.some(b => b.icon === 'paladin_blessing');
   const isPhysicalAttack = enemy.type !== 'caster';
@@ -496,6 +530,32 @@ export function processEnemyAttack(
   }
 
   const result = processBasicAttack(enemy, target, enemy.type === 'caster');
+
+  // Check for Power Word: Shield - absorbs damage before health
+  const pwsBuffIndex = target.buffs.findIndex(b => b.icon === 'priest_shield' && (b.shieldAmount ?? 0) > 0);
+  if (pwsBuffIndex >= 0 && result.events.length > 0 && result.events[0].damage) {
+    const pwsBuff = target.buffs[pwsBuffIndex];
+    const damage = result.events[0].damage;
+    const shieldAmount = pwsBuff.shieldAmount ?? 0;
+
+    if (shieldAmount >= damage) {
+      // Shield absorbs all damage
+      pwsBuff.shieldAmount = shieldAmount - damage;
+      target.stats.health = Math.min(target.stats.maxHealth, target.stats.health + damage);
+      result.events[0].blocked = damage;
+      result.events[0].damage = 0;
+      console.log(`[DEBUG] Power Word: Shield absorbed ${damage} damage, ${pwsBuff.shieldAmount} shield remaining`);
+    } else {
+      // Shield partially absorbs damage
+      const remainingDamage = damage - shieldAmount;
+      target.stats.health = Math.min(target.stats.maxHealth, target.stats.health + shieldAmount);
+      result.events[0].blocked = shieldAmount;
+      result.events[0].damage = remainingDamage;
+      // Remove depleted shield
+      target.buffs.splice(pwsBuffIndex, 1);
+      console.log(`[DEBUG] Power Word: Shield absorbed ${shieldAmount} damage, shield depleted`);
+    }
+  }
 
   // Check for Shield Wall buff - reduces all damage by 50%
   const hasShieldWall = target.buffs.some(b => b.icon === 'warrior_shield');
@@ -509,7 +569,7 @@ export function processEnemyAttack(
 
     // Update the event to show reduced damage
     result.events[0].damage = reducedDamage;
-    result.events[0].blocked = damageReduction; // Track blocked amount for UI
+    result.events[0].blocked = (result.events[0].blocked ?? 0) + damageReduction; // Track blocked amount for UI
 
     console.log(`[DEBUG] Shield Wall reduced damage from ${originalDamage} to ${reducedDamage}`);
   }

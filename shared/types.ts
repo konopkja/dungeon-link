@@ -212,6 +212,7 @@ export interface Buff {
   isDebuff: boolean;
   stacks?: number; // Optional stack count for abilities like Ancestral Spirit
   rank?: number; // Ability rank when buff was applied (for scaling effects)
+  shieldAmount?: number; // Damage absorption shield (Power Word: Shield)
 }
 
 export interface DoTEffect {

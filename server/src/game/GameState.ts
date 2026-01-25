@@ -505,6 +505,11 @@ export class GameStateManager {
         console.log(`[DEBUG] Pet summoned. Total pets: ${state.pets.length}`);
       }
 
+      // Recalculate stats if this was a buff ability (for stat modifiers like Aspect of the Hawk)
+      if (abilityData && abilityData.ability.type === AbilityType.Buff) {
+        recalculateStats(player);
+      }
+
       // Check if this was a debuff ability (DoT)
       if (abilityData && abilityData.ability.type === AbilityType.Debuff && target && 'isBoss' in target) {
         const enemy = target as Enemy;
@@ -620,10 +625,16 @@ export class GameStateManager {
         regenerateMana(player, deltaTime);
 
         // Update buff durations and remove expired buffs
+        const buffCountBefore = player.buffs.length;
         for (const buff of player.buffs) {
           buff.duration -= deltaTime;
         }
         player.buffs = player.buffs.filter(b => b.duration > 0);
+
+        // Recalculate stats if buffs expired (for stat modifier buffs like Aspect of the Hawk)
+        if (player.buffs.length !== buffCountBefore) {
+          recalculateStats(player);
+        }
 
         // Apply continuous movement with collision checking
         const movement = this.playerMovement.get(player.id);
@@ -929,6 +940,12 @@ export class GameStateManager {
             continue;
           }
 
+          // Calculate slow factor from Frostbolt debuff (50% slow)
+          const isSlowed = enemy.debuffs?.some(d =>
+            d.abilityId === 'mage_frostbolt' && d.remainingDuration > 0
+          );
+          const slowFactor = isSlowed ? 0.5 : 1.0;
+
           // Stop patrolling when in combat (players are in the room)
           if (enemy.isPatrolling) {
             enemy.isPatrolling = false;
@@ -1093,7 +1110,7 @@ export class GameStateManager {
               // Check line of sight before attacking pet
               if (!this.hasLineOfSight(state, enemy.position, tauntingPet.position)) {
                 // No clear path, move closer with obstacle avoidance
-                const moveSpeed = 60;
+                const moveSpeed = 60 * slowFactor;
                 const newPos = this.moveWithObstacleAvoidance(
                   state, enemy.position, tauntingPet.position, moveSpeed, deltaTime
                 );
@@ -1127,7 +1144,7 @@ export class GameStateManager {
               }
             } else {
               // Move towards pet with obstacle avoidance
-              const moveSpeed = 60;
+              const moveSpeed = 60 * slowFactor;
               const newPos = this.moveWithObstacleAvoidance(
                 state, enemy.position, tauntingPet.position, moveSpeed, deltaTime
               );
@@ -1242,7 +1259,7 @@ export class GameStateManager {
               // Check line of sight before attacking (skip for same-room or close-range)
               if (!skipLOSCheck && !this.hasLineOfSight(state, enemy.position, nearestPlayer.position)) {
                 // No clear path, try to move closer with obstacle avoidance
-                const moveSpeed = 60;
+                const moveSpeed = 60 * slowFactor;
                 const newPos = this.moveWithObstacleAvoidance(
                   state, enemy.position, nearestPlayer.position, moveSpeed, deltaTime
                 );
@@ -1425,7 +1442,7 @@ export class GameStateManager {
                 }
               } else {
                 // Normal movement towards player
-                const moveSpeed = 60;
+                const moveSpeed = 60 * slowFactor;
                 const newPos = this.moveWithObstacleAvoidance(
                   state, enemy.position, nearestPlayer.position, moveSpeed, deltaTime
                 );
@@ -1565,8 +1582,8 @@ export class GameStateManager {
             }
           }
 
-          // Pet attack range - increased to 300 for ranged attacks
-          const petAttackRange = pet.petType === 'imp' ? 300 : 200;
+          // Pet attack range - increased to 300 for ranged attacks, totems have 250 range
+          const petAttackRange = pet.petType === 'imp' ? 300 : (pet.petType === 'totem' ? 250 : 200);
 
           if (nearestEnemy && nearestEnemyDist <= petAttackRange) {
             // Pet attacks (skip line of sight for now - it was blocking attacks)
@@ -1707,6 +1724,9 @@ export class GameStateManager {
       // Pet following logic (always runs, even outside combat)
       for (const pet of state.pets) {
         if (!pet.isAlive) continue;
+
+        // Totems are stationary - they don't follow the owner
+        if (pet.petType === 'totem') continue;
 
         const owner = state.players.find(p => p.id === pet.ownerId);
         if (!owner || !owner.isAlive) {
@@ -2943,6 +2963,36 @@ export class GameStateManager {
         targetId: null,
         petType: 'imp',
         tauntCooldown: 0
+      };
+    } else if (abilityId === 'shaman_totem') {
+      // Searing Totem - stationary, attacks nearby enemies, fire damage
+      const baseHealth = 30 + state.floor * 5;
+      const baseSpell = 10 + state.floor * 3; // Fire damage
+      pet = {
+        id: petId,
+        ownerId: player.id,
+        name: rank > 1 ? `Searing Totem (Rank ${rank})` : 'Searing Totem',
+        position: {
+          x: player.position.x + 20,
+          y: player.position.y + 20
+        },
+        stats: {
+          health: Math.round(baseHealth * rankBonus),
+          maxHealth: Math.round(baseHealth * rankBonus),
+          mana: 0,
+          maxMana: 0,
+          attackPower: 0,
+          spellPower: Math.round(baseSpell * rankBonus),
+          armor: 0, // Totems are fragile
+          crit: 10,
+          haste: 20, // Fast attack speed
+          lifesteal: 0,
+          resist: 0
+        },
+        isAlive: true,
+        targetId: null,
+        petType: 'totem',
+        tauntCooldown: 999999 // Totems don't taunt
       };
     } else {
       // Default pet

@@ -472,6 +472,23 @@ export function recalculateStats(player: Player): void {
   player.stats.haste += totalBonusStats.haste ?? 0;
   player.stats.lifesteal += totalBonusStats.lifesteal ?? 0;
   player.stats.resist += totalBonusStats.resist ?? 0;
+
+  // Add buff stat modifiers (e.g., Aspect of the Hawk)
+  for (const buff of player.buffs) {
+    if (buff.statModifiers) {
+      player.stats.health += buff.statModifiers.health ?? 0;
+      player.stats.maxHealth += buff.statModifiers.maxHealth ?? 0;
+      player.stats.mana += buff.statModifiers.mana ?? 0;
+      player.stats.maxMana += buff.statModifiers.maxMana ?? 0;
+      player.stats.attackPower += buff.statModifiers.attackPower ?? 0;
+      player.stats.spellPower += buff.statModifiers.spellPower ?? 0;
+      player.stats.armor += buff.statModifiers.armor ?? 0;
+      player.stats.crit += buff.statModifiers.crit ?? 0;
+      player.stats.haste += buff.statModifiers.haste ?? 0;
+      player.stats.lifesteal += buff.statModifiers.lifesteal ?? 0;
+      player.stats.resist += buff.statModifiers.resist ?? 0;
+    }
+  }
 }
 
 /**
