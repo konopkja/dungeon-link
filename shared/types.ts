@@ -286,7 +286,7 @@ export interface Pet {
   stats: Stats;
   isAlive: boolean;
   targetId: string | null;
-  petType: 'imp' | 'voidwalker' | 'beast';
+  petType: 'imp' | 'voidwalker' | 'beast' | 'totem';
   tauntCooldown: number; // seconds until can taunt again
 }
 
