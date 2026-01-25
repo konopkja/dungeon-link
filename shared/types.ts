@@ -500,6 +500,7 @@ export interface CombatEvent {
   isCrit?: boolean;
   isStealthAttack?: boolean;
   killed?: boolean;
+  blocked?: number; // Amount of damage blocked by Shield Wall or similar effects
 }
 
 // ============================================

@@ -35,7 +35,7 @@ export const CLASSES: ClassDefinition[] = [
         cooldown: 60, manaCost: 5, range: 0, isBaseline: false
       },
       {
-        id: 'warrior_shield', name: 'Shield Wall', description: 'Reduce damage taken temporarily.',
+        id: 'warrior_shield', name: 'Shield Wall', description: 'Reduce all damage taken by 50% for 6 seconds.',
         classId: ClassName.Warrior, type: AbilityType.Buff, targetType: TargetType.Self,
         cooldown: 30, manaCost: 5, range: 0, isBaseline: false
       }

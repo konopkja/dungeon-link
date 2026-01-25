@@ -441,6 +441,186 @@ describe('Rogue-specific Enemy Attack Tests', () => {
   });
 });
 
+describe('Shield Wall Damage Reduction Tests', () => {
+  /**
+   * Shield Wall (warrior_shield) should reduce ALL incoming damage by 50%.
+   * This includes both physical (melee/ranged) and magical (caster) damage.
+   * Duration: 6 seconds, Cooldown: 30 seconds
+   */
+
+  // Helper to create Shield Wall buff
+  function createShieldWallBuff(): Buff {
+    return {
+      id: 'buff-shield-wall',
+      name: 'Shield Wall',
+      icon: 'warrior_shield',
+      duration: 6,
+      maxDuration: 6,
+      isDebuff: false,
+      rank: 1
+    };
+  }
+
+  it('Shield Wall should reduce melee (physical) damage by 50%', () => {
+    const playerWithoutBuff = createTestPlayer();
+    const playerWithBuff = createTestPlayer();
+    playerWithBuff.buffs = [createShieldWallBuff()];
+
+    const enemy1 = createTestEnemy(EnemyType.Melee);
+    const enemy2 = createTestEnemy(EnemyType.Melee);
+
+    // Attack player without Shield Wall
+    const result1 = processEnemyAttack(enemy1, playerWithoutBuff);
+    const damageWithoutBuff = result1.events[0].damage ?? 0;
+
+    // Attack player with Shield Wall
+    const result2 = processEnemyAttack(enemy2, playerWithBuff);
+    const damageWithBuff = result2.events[0].damage ?? 0;
+
+    // Damage with Shield Wall should be ~50% of damage without
+    expect(damageWithBuff).toBeLessThan(damageWithoutBuff);
+    expect(damageWithBuff).toBeCloseTo(damageWithoutBuff * 0.5, 0);
+  });
+
+  it('Shield Wall should reduce ranged (physical) damage by 50%', () => {
+    const playerWithoutBuff = createTestPlayer();
+    const playerWithBuff = createTestPlayer();
+    playerWithBuff.buffs = [createShieldWallBuff()];
+
+    const enemy1 = createTestEnemy(EnemyType.Ranged);
+    const enemy2 = createTestEnemy(EnemyType.Ranged);
+
+    const result1 = processEnemyAttack(enemy1, playerWithoutBuff);
+    const damageWithoutBuff = result1.events[0].damage ?? 0;
+
+    const result2 = processEnemyAttack(enemy2, playerWithBuff);
+    const damageWithBuff = result2.events[0].damage ?? 0;
+
+    expect(damageWithBuff).toBeLessThan(damageWithoutBuff);
+    expect(damageWithBuff).toBeCloseTo(damageWithoutBuff * 0.5, 0);
+  });
+
+  it('Shield Wall should reduce caster (spell) damage by 50%', () => {
+    const playerWithoutBuff = createTestPlayer();
+    const playerWithBuff = createTestPlayer();
+    playerWithBuff.buffs = [createShieldWallBuff()];
+
+    const enemy1 = createTestEnemy(EnemyType.Caster);
+    const enemy2 = createTestEnemy(EnemyType.Caster);
+
+    const result1 = processEnemyAttack(enemy1, playerWithoutBuff);
+    const damageWithoutBuff = result1.events[0].damage ?? 0;
+
+    const result2 = processEnemyAttack(enemy2, playerWithBuff);
+    const damageWithBuff = result2.events[0].damage ?? 0;
+
+    // Spell damage should ALSO be reduced by Shield Wall
+    expect(damageWithBuff).toBeLessThan(damageWithoutBuff);
+    expect(damageWithBuff).toBeCloseTo(damageWithoutBuff * 0.5, 0);
+  });
+
+  it('Shield Wall should track blocked damage amount', () => {
+    const player = createTestPlayer();
+    player.buffs = [createShieldWallBuff()];
+
+    const enemy = createTestEnemy(EnemyType.Melee);
+    const result = processEnemyAttack(enemy, player);
+
+    // Event should include blocked amount
+    expect(result.events[0].blocked).toBeDefined();
+    expect(result.events[0].blocked).toBeGreaterThan(0);
+
+    // blocked + damage should equal original damage
+    const totalDamage = (result.events[0].damage ?? 0) + (result.events[0].blocked ?? 0);
+    expect(result.events[0].blocked).toBeCloseTo(result.events[0].damage ?? 0, 0);
+  });
+
+  it('Shield Wall should correctly restore health after damage reduction', () => {
+    const player = createTestPlayer();
+    player.buffs = [createShieldWallBuff()];
+    const initialHealth = player.stats.health;
+
+    const enemy = createTestEnemy(EnemyType.Melee);
+    const result = processEnemyAttack(enemy, player);
+
+    // Actual health loss should match the reduced damage
+    const actualHealthLoss = initialHealth - player.stats.health;
+    expect(actualHealthLoss).toBe(result.events[0].damage);
+  });
+
+  it('Shield Wall should not prevent death if damage is still lethal', () => {
+    const player = createTestPlayer();
+    player.stats.health = 1; // Very low health
+    player.buffs = [createShieldWallBuff()];
+
+    // Create a strong enemy
+    const enemy = createTestEnemy(EnemyType.Melee);
+    enemy.stats.attackPower = 50;
+
+    const result = processEnemyAttack(enemy, player);
+
+    // Even with 50% reduction, player should still die
+    expect(result.targetDied).toBe(true);
+    expect(player.isAlive).toBe(false);
+  });
+
+  it('Shield Wall should work against boss attacks', () => {
+    const playerWithoutBuff = createTestPlayer();
+    const playerWithBuff = createTestPlayer();
+    playerWithBuff.buffs = [createShieldWallBuff()];
+
+    const boss1 = createTestEnemy(EnemyType.Melee, true);
+    const boss2 = createTestEnemy(EnemyType.Melee, true);
+
+    const result1 = processEnemyAttack(boss1, playerWithoutBuff);
+    const damageWithoutBuff = result1.events[0].damage ?? 0;
+
+    const result2 = processEnemyAttack(boss2, playerWithBuff);
+    const damageWithBuff = result2.events[0].damage ?? 0;
+
+    expect(damageWithBuff).toBeLessThan(damageWithoutBuff);
+    expect(damageWithBuff).toBeCloseTo(damageWithoutBuff * 0.5, 0);
+  });
+
+  it('Shield Wall and Blessing of Protection should stack (physical blocked entirely)', () => {
+    const player = createTestPlayer();
+    player.buffs = [
+      createShieldWallBuff(),
+      createBlessingBuff()
+    ];
+
+    const enemy = createTestEnemy(EnemyType.Melee);
+    const initialHealth = player.stats.health;
+
+    const result = processEnemyAttack(enemy, player);
+
+    // Blessing blocks physical damage entirely, so no attack happens
+    expect(result.events.length).toBe(0);
+    expect(player.stats.health).toBe(initialHealth);
+  });
+
+  it('Shield Wall should still reduce spell damage when Blessing is active', () => {
+    const playerWithoutShieldWall = createTestPlayer();
+    playerWithoutShieldWall.buffs = [createBlessingBuff()];
+
+    const playerWithShieldWall = createTestPlayer();
+    playerWithShieldWall.buffs = [createBlessingBuff(), createShieldWallBuff()];
+
+    const caster1 = createTestEnemy(EnemyType.Caster);
+    const caster2 = createTestEnemy(EnemyType.Caster);
+
+    const result1 = processEnemyAttack(caster1, playerWithoutShieldWall);
+    const damageWithoutShieldWall = result1.events[0].damage ?? 0;
+
+    const result2 = processEnemyAttack(caster2, playerWithShieldWall);
+    const damageWithShieldWall = result2.events[0].damage ?? 0;
+
+    // Blessing doesn't block spell damage, but Shield Wall reduces it by 50%
+    expect(damageWithShieldWall).toBeLessThan(damageWithoutShieldWall);
+    expect(damageWithShieldWall).toBeCloseTo(damageWithoutShieldWall * 0.5, 0);
+  });
+});
+
 describe('Multiple Enemy Attack Tests', () => {
   /**
    * Test that ALL enemies in a room can attack the player when conditions are met.

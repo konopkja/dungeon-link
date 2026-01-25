@@ -497,6 +497,23 @@ export function processEnemyAttack(
 
   const result = processBasicAttack(enemy, target, enemy.type === 'caster');
 
+  // Check for Shield Wall buff - reduces all damage by 50%
+  const hasShieldWall = target.buffs.some(b => b.icon === 'warrior_shield');
+  if (hasShieldWall && result.events.length > 0 && result.events[0].damage) {
+    const originalDamage = result.events[0].damage;
+    const reducedDamage = Math.round(originalDamage * 0.5);
+    const damageReduction = originalDamage - reducedDamage;
+
+    // Restore health that was already subtracted, then apply reduced damage
+    target.stats.health = Math.min(target.stats.maxHealth, target.stats.health + damageReduction);
+
+    // Update the event to show reduced damage
+    result.events[0].damage = reducedDamage;
+    result.events[0].blocked = damageReduction; // Track blocked amount for UI
+
+    console.log(`[DEBUG] Shield Wall reduced damage from ${originalDamage} to ${reducedDamage}`);
+  }
+
   // Check for Retaliation buff - reflect damage back to attacker
   const hasRetaliation = target.buffs.some(b => b.icon === 'warrior_retaliation');
   if (hasRetaliation && result.events.length > 0 && result.events[0].damage) {
