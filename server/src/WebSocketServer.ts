@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { ClientMessage, ServerMessage, ClassName } from '@dungeon-link/shared';
 import { WS_CONFIG, GAME_CONFIG } from '@dungeon-link/shared';
 import { gameStateManager } from './game/GameState.js';
@@ -11,16 +12,37 @@ interface ClientConnection {
 
 export class GameWebSocketServer {
   private wss: WebSocketServer;
+  private httpServer: ReturnType<typeof createServer>;
   private clients: Map<WebSocket, ClientConnection> = new Map();
   private updateInterval: NodeJS.Timeout | null = null;
 
   constructor(port: number = WS_CONFIG.PORT) {
-    this.wss = new WebSocketServer({ port });
+    // Create HTTP server for healthchecks
+    this.httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+      // Healthcheck endpoint
+      if (req.url === '/' || req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          status: 'ok',
+          service: 'dungeon-link-server',
+          clients: this.clients.size
+        }));
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    });
+
+    // Attach WebSocket server to HTTP server
+    this.wss = new WebSocketServer({ server: this.httpServer });
 
     this.wss.on('connection', (ws) => this.handleConnection(ws));
     this.wss.on('error', (error) => console.error('WebSocket server error:', error));
 
-    console.log(`WebSocket server started on port ${port}`);
+    // Start HTTP server
+    this.httpServer.listen(port, () => {
+      console.log(`Server started on port ${port} (HTTP + WebSocket)`);
+    });
 
     // Start game loop
     this.startGameLoop();
@@ -331,5 +353,6 @@ export class GameWebSocketServer {
       clearInterval(this.updateInterval);
     }
     this.wss.close();
+    this.httpServer.close();
   }
 }

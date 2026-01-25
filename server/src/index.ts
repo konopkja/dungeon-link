@@ -21,5 +21,4 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-console.log(`Server running on port ${port}`);
 console.log('Waiting for connections...');

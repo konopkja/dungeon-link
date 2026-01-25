@@ -1,5 +1,5 @@
 # Railway configuration for Dungeon Link Server
-# This deploys the WebSocket game server
+# This deploys the WebSocket game server (no HTTP healthcheck needed)
 
 [build]
 builder = "nixpacks"
