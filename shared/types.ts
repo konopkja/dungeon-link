@@ -1,0 +1,582 @@
+// ============================================
+// ENUMS
+// ============================================
+
+export enum ClassName {
+  Warrior = 'warrior',
+  Paladin = 'paladin',
+  Hunter = 'hunter',
+  Rogue = 'rogue',
+  Priest = 'priest',
+  Shaman = 'shaman',
+  Mage = 'mage',
+  Warlock = 'warlock',
+  Druid = 'druid'
+}
+
+export enum EquipSlot {
+  Head = 'head',
+  Chest = 'chest',
+  Legs = 'legs',
+  Feet = 'feet',
+  Hands = 'hands',
+  Weapon = 'weapon',
+  Ring = 'ring',
+  Trinket = 'trinket'
+}
+
+export enum Rarity {
+  Common = 'common',
+  Uncommon = 'uncommon',
+  Rare = 'rare',
+  Epic = 'epic',
+  Legendary = 'legendary'
+}
+
+export enum EnemyType {
+  Melee = 'melee',
+  Ranged = 'ranged',
+  Caster = 'caster'
+}
+
+export enum AbilityType {
+  Damage = 'damage',
+  Heal = 'heal',
+  Buff = 'buff',
+  Debuff = 'debuff',
+  Summon = 'summon',
+  Utility = 'utility'
+}
+
+export enum SetType {
+  Caster = 'caster',
+  MeleeDPS = 'melee_dps',
+  Tank = 'tank'
+}
+
+export enum TargetType {
+  Self = 'self',
+  Enemy = 'enemy',
+  Ally = 'ally',
+  AoE = 'aoe',
+  Ground = 'ground'
+}
+
+// ============================================
+// FLOOR THEMES
+// ============================================
+
+export enum FloorTheme {
+  Crypt = 'crypt',       // Standard dungeon - baseline
+  Inferno = 'inferno',   // Lava, fire hazards, +25% gold
+  Frozen = 'frozen',     // Ice sliding, chill effects
+  Swamp = 'swamp',       // Poison clouds, DoT effects
+  Shadow = 'shadow',     // Limited visibility, ambushes
+  Treasure = 'treasure'  // Lots of traps, guaranteed rare loot
+}
+
+// Theme-specific modifiers
+export interface FloorThemeModifiers {
+  goldMultiplier: number;
+  trapMultiplier: number;
+  visibilityRadius?: number;  // For shadow theme
+  hazardDamage?: number;      // For inferno/swamp
+  movementModifier?: number;  // For frozen (sliding)
+}
+
+// ============================================
+// STATS
+// ============================================
+
+export interface Stats {
+  health: number;
+  maxHealth: number;
+  mana: number;
+  maxMana: number;
+  attackPower: number;
+  spellPower: number;
+  armor: number;
+  crit: number;
+  haste: number;
+  lifesteal: number;
+  resist: number;
+}
+
+export interface ItemStats {
+  health?: number;
+  mana?: number;
+  attackPower?: number;
+  spellPower?: number;
+  armor?: number;
+  crit?: number;
+  haste?: number;
+  lifesteal?: number;
+  resist?: number;
+}
+
+// ============================================
+// ABILITIES
+// ============================================
+
+export interface AbilityDefinition {
+  id: string;
+  name: string;
+  description: string;
+  classId: ClassName;
+  type: AbilityType;
+  targetType: TargetType;
+  cooldown: number; // seconds
+  manaCost: number;
+  baseDamage?: number;
+  baseHeal?: number;
+  range: number;
+  isBaseline: boolean; // true = starts with it, false = boss drop only
+  effectId?: string;
+}
+
+export interface PlayerAbility {
+  abilityId: string;
+  rank: number;
+  currentCooldown: number;
+}
+
+// ============================================
+// ITEMS
+// ============================================
+
+export interface Item {
+  id: string;
+  name: string;
+  slot: EquipSlot;
+  rarity: Rarity;
+  stats: ItemStats;
+  floorDropped: number;
+  requiredClass?: ClassName[];
+  setId?: string; // ID of the set this item belongs to
+  setType?: SetType; // Type of set (caster, melee_dps, tank)
+}
+
+export interface SetBonus {
+  piecesRequired: number;
+  bonusStats: ItemStats;
+  bonusDescription: string;
+}
+
+export interface SetDefinition {
+  id: string;
+  name: string;
+  setType: SetType;
+  pieces: EquipSlot[]; // Which slots this set has pieces for
+  bonuses: SetBonus[];
+}
+
+export interface Equipment {
+  [EquipSlot.Head]: Item | null;
+  [EquipSlot.Chest]: Item | null;
+  [EquipSlot.Legs]: Item | null;
+  [EquipSlot.Feet]: Item | null;
+  [EquipSlot.Hands]: Item | null;
+  [EquipSlot.Weapon]: Item | null;
+  [EquipSlot.Ring]: Item | null;
+  [EquipSlot.Trinket]: Item | null;
+}
+
+// ============================================
+// CONSUMABLES
+// ============================================
+
+export enum PotionType {
+  Health = 'health',
+  Mana = 'mana'
+}
+
+export interface Potion {
+  id: string;
+  type: PotionType;
+  name: string;
+  amount: number; // Amount restored
+  rarity: Rarity;
+}
+
+// ============================================
+// BUFFS & DEBUFFS
+// ============================================
+
+export interface Buff {
+  id: string;
+  name: string;
+  icon: string;
+  duration: number; // Remaining duration in seconds
+  maxDuration: number;
+  statModifiers?: Partial<Stats>;
+  isDebuff: boolean;
+  stacks?: number; // Optional stack count for abilities like Ancestral Spirit
+  rank?: number; // Ability rank when buff was applied (for scaling effects)
+}
+
+export interface DoTEffect {
+  id: string;
+  sourceId: string; // Who applied it
+  abilityId: string;
+  name: string;
+  damagePerTick: number;
+  tickInterval: number; // seconds between ticks
+  remainingDuration: number;
+  lastTickTime: number; // tracks when last tick occurred
+}
+
+// ============================================
+// ENTITIES
+// ============================================
+
+export interface Position {
+  x: number;
+  y: number;
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  classId: ClassName;
+  position: Position;
+  stats: Stats;
+  baseStats: Stats;
+  equipment: Equipment;
+  abilities: PlayerAbility[];
+  gold: number;
+  rerollTokens: number;
+  isAlive: boolean;
+  targetId: string | null;
+  backpack: (Item | Potion)[]; // Items and potions in inventory
+  buffs: Buff[];
+  level: number;
+  xp: number;
+  xpToNextLevel: number;
+}
+
+export interface Enemy {
+  id: string;
+  type: EnemyType;
+  name: string;
+  position: Position;
+  stats: Stats;
+  isAlive: boolean;
+  targetId: string | null;
+  isBoss: boolean;
+  isRare: boolean;
+  isElite?: boolean;  // Elite enemies: stronger than normal, less rare than rare mobs
+  bossId?: string;
+  bossMechanics?: BossMechanic[];  // Mechanics info for display in target panel
+  debuffs: DoTEffect[];
+  // Patrol properties (optional)
+  isPatrolling?: boolean;  // Whether this enemy patrols between rooms
+  patrolRoute?: string[];  // Room IDs to patrol between
+  currentRoomId?: string;  // Current room the patrolling enemy is in
+  patrolTargetRoomId?: string;  // Next room to patrol to
+  originalRoomId?: string;  // Original spawn room (for returning after player respawn)
+  spawnPosition?: Position;  // Original spawn position for leash reset
+}
+
+export interface Pet {
+  id: string;
+  ownerId: string;
+  name: string;
+  position: Position;
+  stats: Stats;
+  isAlive: boolean;
+  targetId: string | null;
+  petType: 'imp' | 'voidwalker' | 'beast';
+  tauntCooldown: number; // seconds until can taunt again
+}
+
+// ============================================
+// GROUND ITEMS
+// ============================================
+
+export interface GroundItem {
+  id: string;
+  item: Item | Potion;
+  position: Position;
+  droppedAt: number; // timestamp
+}
+
+// ============================================
+// TRAPS AND CHESTS
+// ============================================
+
+export enum TrapType {
+  Spikes = 'spikes',
+  Flamethrower = 'flamethrower'
+}
+
+export interface Trap {
+  id: string;
+  type: TrapType;
+  position: Position;
+  isActive: boolean;           // Currently dealing damage
+  cooldown: number;            // Time until next activation
+  damage: number;              // Damage dealt
+  activeDuration: number;      // How long trap stays active
+  inactiveDuration: number;    // How long trap stays inactive
+  direction?: 'up' | 'down' | 'left' | 'right'; // For flamethrower
+}
+
+export interface Chest {
+  id: string;
+  position: Position;
+  isOpen: boolean;
+  isLocked: boolean;           // Requires key to open
+  lootTier: 'common' | 'rare' | 'epic'; // Determines loot quality
+  contents?: (Item | Potion | { type: 'gold'; amount: number })[];
+  isMimic?: boolean;           // Treasure theme: spawns enemy when opened
+}
+
+// ============================================
+// DUNGEON
+// ============================================
+
+export interface Room {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: 'start' | 'normal' | 'boss' | 'rare';
+  enemies: Enemy[];
+  cleared: boolean;
+  connectedTo: string[];
+  vendor?: Vendor; // Trainer NPC
+  shopVendor?: Vendor; // Shop vendor NPC for selling items
+  groundItems?: GroundItem[]; // Items dropped on the ground
+  traps?: Trap[];    // Room traps (spikes, flamethrowers)
+  chests?: Chest[];  // Lootable chests
+}
+
+// ============================================
+// VENDOR
+// ============================================
+
+export interface Vendor {
+  id: string;
+  name: string;
+  position: Position;
+  vendorType: 'trainer' | 'shop'; // Type of vendor
+}
+
+export interface VendorService {
+  type: 'level_up' | 'train_ability' | 'sell_item' | 'sell_all';
+  abilityId?: string; // For training specific abilities
+  itemId?: string; // For selling specific items
+  cost: number; // For purchases, this is the cost; for selling, this is the gold received
+  description: string;
+}
+
+export interface Dungeon {
+  floor: number;
+  seed: string;
+  rooms: Room[];
+  currentRoomId: string;
+  bossDefeated: boolean;
+  theme: FloorTheme;
+  themeModifiers: FloorThemeModifiers;
+}
+
+// ============================================
+// LOOT
+// ============================================
+
+export interface LootDrop {
+  type: 'item' | 'ability' | 'gold' | 'rerollToken' | 'potion';
+  item?: Item;
+  potion?: Potion;
+  abilityId?: string;
+  goldAmount?: number;
+  tokenCount?: number;
+  wasConverted?: boolean; // true if ability was converted to fallback
+}
+
+// ============================================
+// GROUND EFFECTS (Boss AoE Spells)
+// ============================================
+
+export enum GroundEffectType {
+  ExpandingCircle = 'expanding_circle', // Expands outward from center
+  FirePool = 'fire_pool', // Static fire on ground
+  MovingWave = 'moving_wave', // Wave moving in one direction
+  RotatingBeam = 'rotating_beam', // Beam rotating around boss
+  VoidZone = 'void_zone' // Growing dark zone
+}
+
+export interface GroundEffect {
+  id: string;
+  type: GroundEffectType;
+  position: Position;
+  sourceId: string; // Boss that created it
+  radius: number; // Current radius
+  maxRadius: number; // Max radius before disappearing
+  damage: number; // Damage per tick
+  tickInterval: number; // Seconds between damage ticks
+  duration: number; // Remaining duration
+  direction?: Position; // For moving effects
+  speed?: number; // Movement speed
+  color: string; // Visual color (hex string)
+}
+
+// ============================================
+// GAME STATE
+// ============================================
+
+export interface RunState {
+  runId: string;
+  seed: string;
+  floor: number;
+  players: Player[];
+  pets: Pet[];
+  dungeon: Dungeon;
+  inCombat: boolean;
+  pendingLoot: LootDrop[];
+  partyScaling: {
+    healthMultiplier: number;
+    damageMultiplier: number;
+  };
+  groundEffects: GroundEffect[];
+}
+
+// ============================================
+// NETWORK MESSAGES
+// ============================================
+
+export type ClientMessage =
+  | { type: 'CREATE_RUN'; playerName: string; classId: ClassName }
+  | { type: 'CREATE_RUN_FROM_SAVE'; saveData: SaveData } // Create run from saved character
+  | { type: 'JOIN_RUN'; runId: string; playerName: string; classId: ClassName }
+  | { type: 'PLAYER_INPUT'; input: PlayerInput }
+  | { type: 'SET_TARGET'; targetId: string | null }
+  | { type: 'COLLECT_LOOT'; lootIndex: number }
+  | { type: 'EQUIP_ITEM'; itemId: string }
+  | { type: 'USE_ITEM'; itemId: string } // For using potions
+  | { type: 'SWAP_EQUIPMENT'; backpackIndex: number; slot: EquipSlot } // Swap backpack item with equipped
+  | { type: 'UNEQUIP_ITEM'; slot: EquipSlot } // Unequip item to backpack
+  | { type: 'ADVANCE_FLOOR' }
+  | { type: 'INTERACT_VENDOR'; vendorId: string } // Open vendor dialog
+  | { type: 'PURCHASE_SERVICE'; vendorId: string; serviceType: 'level_up' | 'train_ability' | 'sell_item' | 'sell_all'; abilityId?: string; itemId?: string }
+  | { type: 'PICKUP_GROUND_ITEM'; itemId: string } // Manual click-to-pickup
+  | { type: 'OPEN_CHEST'; chestId: string } // Open a chest
+  | { type: 'PING' };
+
+export interface PlayerInput {
+  moveX: number;
+  moveY: number;
+  castAbility?: string;
+  targetId?: string;
+  targetPosition?: Position;
+}
+
+export type ServerMessage =
+  | { type: 'RUN_CREATED'; runId: string; state: RunState }
+  | { type: 'RUN_JOINED'; playerId: string; state: RunState }
+  | { type: 'JOIN_ERROR'; message: string }
+  | { type: 'STATE_UPDATE'; state: RunState }
+  | { type: 'COMBAT_EVENT'; event: CombatEvent }
+  | { type: 'LOOT_DROP'; loot: LootDrop[] }
+  | { type: 'FLOOR_COMPLETE'; floor: number }
+  | { type: 'PLAYER_JOINED'; player: Player }
+  | { type: 'PLAYER_LEFT'; playerId: string }
+  | { type: 'GROUND_EFFECT'; effect: GroundEffect }
+  | { type: 'VENDOR_SERVICES'; vendorId: string; services: VendorService[] }
+  | { type: 'PURCHASE_RESULT'; success: boolean; message: string; newGold?: number }
+  | { type: 'ITEM_COLLECTED'; playerId: string; itemName: string; itemType: 'item' | 'potion' }
+  | { type: 'CHEST_OPENED'; chestId: string; playerId: string; loot: string[] } // Chest opened with loot descriptions
+  | { type: 'TRAP_TRIGGERED'; trapId: string; playerId: string; damage: number } // Player hit by trap
+  | { type: 'POTION_USED'; playerId: string; potionType: 'health' | 'mana' } // Player used a potion
+  | { type: 'PONG' };
+
+export interface CombatEvent {
+  sourceId: string;
+  targetId: string;
+  abilityId?: string;
+  damage?: number;
+  heal?: number;
+  isCrit?: boolean;
+  isStealthAttack?: boolean;
+  killed?: boolean;
+}
+
+// ============================================
+// BOSS DEFINITIONS
+// ============================================
+
+export interface BossDefinition {
+  id: string;
+  name: string;
+  floorBand: [number, number]; // [min, max] floors this boss can appear
+  baseHealth: number;
+  baseDamage: number;
+  abilities: string[];
+  mechanics: BossMechanic[];
+  lootTable: BossLootEntry[];
+}
+
+export interface BossMechanic {
+  id: string;
+  name: string;
+  description: string;
+  triggerHealthPercent?: number;
+  intervalSeconds?: number;
+}
+
+export interface BossLootEntry {
+  type: 'item' | 'ability' | 'cosmetic';
+  dropChance: number;
+  itemSlot?: EquipSlot;
+  rarityWeights?: Partial<Record<Rarity, number>>;
+}
+
+// ============================================
+// ENEMY DEFINITIONS
+// ============================================
+
+export interface EnemyDefinition {
+  id: string;
+  name: string;
+  type: EnemyType;
+  baseHealth: number;
+  baseDamage: number;
+  attackRange: number;
+  moveSpeed: number;
+}
+
+// ============================================
+// CLASS DEFINITIONS
+// ============================================
+
+export interface ClassDefinition {
+  id: ClassName;
+  name: string;
+  description: string;
+  color: string;
+  baseStats: Stats;
+  abilities: AbilityDefinition[];
+}
+
+// ============================================
+// SAVE DATA
+// ============================================
+
+export interface SaveData {
+  version: number; // For save compatibility
+  timestamp: number;
+  playerName: string;
+  classId: ClassName;
+  level: number;
+  xp: number;
+  xpToNextLevel: number;
+  gold: number;
+  rerollTokens: number;
+  baseStats: Stats;
+  equipment: Equipment;
+  abilities: PlayerAbility[];
+  backpack: (Item | Potion)[];
+  highestFloor: number;
+  lives: number; // 5 lives max, character deleted when 0
+}

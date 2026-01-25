@@ -1,0 +1,11 @@
+# Railway configuration for Dungeon Link Server
+# This deploys the WebSocket game server
+
+[build]
+builder = "nixpacks"
+buildCommand = "npm install && npm run build --workspace=server"
+
+[deploy]
+startCommand = "npm run start --workspace=server"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
