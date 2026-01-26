@@ -2525,14 +2525,30 @@ export class GameScene extends Phaser.Scene {
     const sprite = this.enemySprites.get(enemyId);
     if (!sprite) return;
 
-    // Determine effect colors based on enemy name
+    // Brief scale pulse on the enemy sprite
+    this.tweens.add({
+      targets: sprite,
+      scaleX: sprite.scaleX * 1.15,
+      scaleY: sprite.scaleY * 1.15,
+      duration: 100,
+      yoyo: true,
+      ease: 'Quad.easeOut'
+    });
+
+    // RANGED (archer/physical) attack - bow and arrow effect
+    if (enemyType === 'ranged') {
+      this.playArcherAttackAnimation(position);
+      return;
+    }
+
+    // CASTER (magic) attack - determine effect colors based on enemy name
     let primaryColor = 0x8844ff;
     let secondaryColor = 0xaa66ff;
     let effectType: 'spectral' | 'dark' | 'void' = 'dark';
 
     const nameLower = enemyName.toLowerCase();
 
-    // Spectral/ghost types (ranged) - ethereal blue/white
+    // Spectral/ghost types - ethereal blue/white
     if (nameLower.includes('soul') || nameLower.includes('wraith') || nameLower.includes('phantom') || nameLower.includes('ghost') || nameLower.includes('spirit')) {
       primaryColor = 0x88ccff;
       secondaryColor = 0xaaeeff;
@@ -2550,16 +2566,6 @@ export class GameScene extends Phaser.Scene {
       secondaryColor = 0x66cc66;
       effectType = 'dark';
     }
-
-    // Brief scale pulse on the enemy sprite
-    this.tweens.add({
-      targets: sprite,
-      scaleX: sprite.scaleX * 1.15,
-      scaleY: sprite.scaleY * 1.15,
-      duration: 100,
-      yoyo: true,
-      ease: 'Quad.easeOut'
-    });
 
     // Create casting effect based on type
     if (effectType === 'spectral') {
@@ -2659,6 +2665,88 @@ export class GameScene extends Phaser.Scene {
         });
       }
     }
+  }
+
+  /**
+   * Play archer/physical ranged attack animation
+   * Shows a bow-drawing motion with arrow release effect
+   */
+  private playArcherAttackAnimation(position: { x: number; y: number }): void {
+    // Colors for archer effects - brown/gold for physical
+    const bowColor = 0x8b4513;  // Saddle brown
+    const arrowColor = 0xdaa520; // Goldenrod
+    const stringColor = 0xf5deb3; // Wheat
+
+    // Draw bow string pullback effect
+    const stringStart = this.add.graphics();
+    stringStart.setDepth(110);
+    stringStart.lineStyle(2, stringColor, 0.8);
+    stringStart.beginPath();
+    stringStart.moveTo(position.x - 8, position.y - 12);
+    stringStart.lineTo(position.x + 5, position.y);
+    stringStart.lineTo(position.x - 8, position.y + 12);
+    stringStart.strokePath();
+
+    // Animate string snap back
+    this.tweens.add({
+      targets: stringStart,
+      alpha: 0,
+      duration: 150,
+      ease: 'Quad.easeOut',
+      onComplete: () => stringStart.destroy()
+    });
+
+    // Arrow nock flash (where arrow was)
+    const nockFlash = this.add.circle(position.x + 5, position.y, 4, arrowColor, 0.9);
+    nockFlash.setDepth(111);
+    this.tweens.add({
+      targets: nockFlash,
+      scale: 2,
+      alpha: 0,
+      duration: 200,
+      ease: 'Quad.easeOut',
+      onComplete: () => nockFlash.destroy()
+    });
+
+    // Small dust/motion particles from release
+    for (let i = 0; i < 4; i++) {
+      const angle = (Math.random() - 0.5) * Math.PI * 0.5 + Math.PI; // Mostly backward
+      const particle = this.add.circle(
+        position.x + 8,
+        position.y + (Math.random() - 0.5) * 8,
+        2,
+        0xaaaaaa,
+        0.6
+      );
+      particle.setDepth(109);
+
+      this.tweens.add({
+        targets: particle,
+        x: position.x + 8 + Math.cos(angle) * 15,
+        y: position.y + Math.sin(angle) * 15,
+        alpha: 0,
+        scale: 0.5,
+        duration: 200 + Math.random() * 100,
+        ease: 'Quad.easeOut',
+        onComplete: () => particle.destroy()
+      });
+    }
+
+    // Bow arm motion indicator (brief arc)
+    const bowArc = this.add.graphics();
+    bowArc.setDepth(108);
+    bowArc.lineStyle(3, bowColor, 0.6);
+    bowArc.beginPath();
+    bowArc.arc(position.x - 5, position.y, 15, -Math.PI * 0.4, Math.PI * 0.4);
+    bowArc.strokePath();
+
+    this.tweens.add({
+      targets: bowArc,
+      alpha: 0,
+      duration: 250,
+      ease: 'Quad.easeOut',
+      onComplete: () => bowArc.destroy()
+    });
   }
 
   private createDecorationAnimations(): void {
