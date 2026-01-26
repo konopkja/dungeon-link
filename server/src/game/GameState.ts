@@ -1192,8 +1192,8 @@ export class GameStateManager {
             }
 
             if (!nearestPlayer) {
-              // Debug: log why no player was found (only occasionally to avoid spam)
-              if (Math.random() < 0.01) {
+              // Debug: log why no player was found (occasionally to avoid spam)
+              if (Math.random() < 0.05) {
                 const alivePlayers = state.players.filter(p => p.isAlive);
                 const stealthedPlayers = state.players.filter(p => p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth'));
                 console.log(`[DEBUG] Enemy ${enemy.name} found no target. Alive: ${alivePlayers.length}, Stealthed: ${stealthedPlayers.length}`);
@@ -1378,6 +1378,11 @@ export class GameStateManager {
                 }
               }
             } else {
+              // Enemy is outside attack range - need to move closer
+              if (Math.random() < 0.02) {
+                console.log(`[DEBUG] Enemy ${enemy.name} outside range (dist=${Math.round(nearestDist)}, range=${attackRange}), moving towards ${nearestPlayer.name}`);
+              }
+
               // Check if melee enemy should charge
               const isCharging = this.enemyCharging.has(enemy.id);
               const chargeCooldown = this.enemyChargeCooldowns.get(enemy.id) ?? 0;
