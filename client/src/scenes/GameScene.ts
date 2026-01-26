@@ -2648,38 +2648,71 @@ export class GameScene extends Phaser.Scene {
       });
 
     } else {
-      // Dark magic - swirling particles
-      for (let i = 0; i < 8; i++) {
-        const startAngle = (i / 8) * Math.PI * 2;
-        const particle = this.add.circle(
-          position.x + Math.cos(startAngle) * 20,
-          position.y + Math.sin(startAngle) * 20,
-          3, primaryColor, 0.8
-        );
-        particle.setDepth(110);
+      // Dark magic / Cultist - ritual circle with rising energy
+      // This is visually distinct from spectral wisps
 
-        // Spiral inward then burst
+      // Ritual circle under the caster
+      const ritualCircle = this.add.graphics();
+      ritualCircle.setDepth(105);
+      ritualCircle.lineStyle(3, primaryColor, 0.8);
+      ritualCircle.strokeCircle(position.x, position.y, 25);
+      // Inner pentagram-like lines
+      ritualCircle.lineStyle(2, secondaryColor, 0.6);
+      for (let i = 0; i < 5; i++) {
+        const angle1 = (i / 5) * Math.PI * 2 - Math.PI / 2;
+        const angle2 = ((i + 2) / 5) * Math.PI * 2 - Math.PI / 2;
+        ritualCircle.lineBetween(
+          position.x + Math.cos(angle1) * 20,
+          position.y + Math.sin(angle1) * 20,
+          position.x + Math.cos(angle2) * 20,
+          position.y + Math.sin(angle2) * 20
+        );
+      }
+
+      // Fade out ritual circle
+      this.tweens.add({
+        targets: ritualCircle,
+        alpha: 0,
+        duration: 400,
+        ease: 'Quad.easeOut',
+        onComplete: () => ritualCircle.destroy()
+      });
+
+      // Rising green flames/energy pillars
+      for (let i = 0; i < 4; i++) {
+        const angle = (i / 4) * Math.PI * 2;
+        const flameX = position.x + Math.cos(angle) * 18;
+        const flameY = position.y + Math.sin(angle) * 18;
+
+        const flame = this.add.ellipse(flameX, flameY, 8, 16, primaryColor, 0.9);
+        flame.setDepth(112);
+
+        // Flames rise up and fade
         this.tweens.add({
-          targets: particle,
-          x: position.x,
-          y: position.y,
-          duration: 150,
-          ease: 'Quad.easeIn',
-          onComplete: () => {
-            // Burst outward
-            const burstAngle = Math.random() * Math.PI * 2;
-            this.tweens.add({
-              targets: particle,
-              x: position.x + Math.cos(burstAngle) * 15,
-              y: position.y + Math.sin(burstAngle) * 15,
-              alpha: 0,
-              duration: 200,
-              ease: 'Quad.easeOut',
-              onComplete: () => particle.destroy()
-            });
-          }
+          targets: flame,
+          y: flameY - 30,
+          scaleY: 2,
+          scaleX: 0.5,
+          alpha: 0,
+          duration: 350,
+          ease: 'Quad.easeOut',
+          onComplete: () => flame.destroy()
         });
       }
+
+      // Central energy burst upward
+      const energyCore = this.add.circle(position.x, position.y - 5, 10, secondaryColor, 0.8);
+      energyCore.setDepth(113);
+      this.tweens.add({
+        targets: energyCore,
+        y: position.y - 25,
+        scaleX: 0.3,
+        scaleY: 1.5,
+        alpha: 0,
+        duration: 300,
+        ease: 'Quad.easeOut',
+        onComplete: () => energyCore.destroy()
+      });
     }
   }
 
