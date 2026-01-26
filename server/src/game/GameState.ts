@@ -1253,6 +1253,11 @@ export class GameStateManager {
             // Enemy has a target - clear leash timer
             this.enemyLeashTimers.delete(enemy.id);
 
+            // Debug: log when enemy finds a player (occasionally)
+            if (Math.random() < 0.02) {
+              console.log(`[DEBUG] Enemy ${enemy.name} found player ${nearestPlayer.name} at dist=${Math.round(nearestDist)}`);
+            }
+
             // Track aggro time when enemy first spots a player
             if (!this.enemyAggroTimes.has(enemy.id)) {
               this.enemyAggroTimes.set(enemy.id, Date.now());
