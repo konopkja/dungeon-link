@@ -5308,7 +5308,10 @@ export class GameScene extends Phaser.Scene {
 
         // Only spawn projectile if distance is > 60 (ranged attack)
         if (dist > 60) {
-          this.spawnProjectile(sourcePos.x, sourcePos.y, targetPos.x, targetPos.y, event.abilityId);
+          // Pass enemy type for enemy attacks (caster vs ranged)
+          const enemyType = sourceEnemy?.type;
+          const enemyName = sourceEnemy?.name;
+          this.spawnProjectile(sourcePos.x, sourcePos.y, targetPos.x, targetPos.y, event.abilityId, enemyType, enemyName);
         }
       }
 
@@ -5866,11 +5869,14 @@ export class GameScene extends Phaser.Scene {
     this.damageTexts = this.damageTexts.filter(text => text.active);
   }
 
-  private spawnProjectile(fromX: number, fromY: number, toX: number, toY: number, abilityId?: string): void {
+  private spawnProjectile(fromX: number, fromY: number, toX: number, toY: number, abilityId?: string, enemyType?: string, enemyName?: string): void {
     // Create projectile container
     const projectile = this.add.container(fromX, fromY).setDepth(50);
 
-    // Determine projectile visual based on ability type
+    // Calculate rotation to face target
+    const angle = Math.atan2(toY - fromY, toX - fromX);
+
+    // Determine projectile visual based on ability type or enemy type
     const spellColors = this.getSpellColors(abilityId);
 
     if (abilityId) {
@@ -5888,15 +5894,56 @@ export class GameScene extends Phaser.Scene {
         const trail = this.add.circle(0, 0, spellColors.size - 2, spellColors.secondary, 0.5);
         projectile.add(trail);
       }
+    } else if (enemyType === 'caster' || (enemyName && (
+      enemyName.toLowerCase().includes('acolyte') ||
+      enemyName.toLowerCase().includes('cultist') ||
+      enemyName.toLowerCase().includes('priest')
+    ))) {
+      // CASTER enemy magic bolt - green/purple orb
+      const orbColor = 0x44aa44; // Green for dark magic
+      const glowColor = 0x66cc66;
+
+      const orb = this.add.circle(0, 0, 6, orbColor);
+      orb.setStrokeStyle(2, glowColor);
+      projectile.add(orb);
+
+      // Add glow effect
+      const glow = this.add.circle(0, 0, 10, orbColor, 0.4);
+      projectile.add(glow);
+
+      // Add trailing effect
+      const trail = this.add.circle(-4, 0, 4, glowColor, 0.5);
+      projectile.add(trail);
+
+      // Rotate to face target
+      projectile.setRotation(angle);
+    } else if (enemyName && (
+      enemyName.toLowerCase().includes('soul') ||
+      enemyName.toLowerCase().includes('wraith') ||
+      enemyName.toLowerCase().includes('phantom') ||
+      enemyName.toLowerCase().includes('ghost')
+    )) {
+      // SPECTRAL enemy - blue ethereal bolt
+      const orbColor = 0x88ccff;
+      const glowColor = 0xaaeeff;
+
+      const orb = this.add.circle(0, 0, 5, orbColor, 0.8);
+      orb.setStrokeStyle(1, glowColor);
+      projectile.add(orb);
+
+      // Ethereal glow
+      const glow = this.add.circle(0, 0, 9, glowColor, 0.3);
+      projectile.add(glow);
+
+      // No rotation needed for ethereal orb
     } else {
-      // Arrow/bolt for auto-attacks
+      // ARCHER/RANGED enemy - yellow arrow
       const arrow = this.add.graphics();
       arrow.fillStyle(0xccaa44);
       arrow.fillTriangle(-8, -2, -8, 2, 8, 0);
       projectile.add(arrow);
 
-      // Calculate rotation to face target
-      const angle = Math.atan2(toY - fromY, toX - fromX);
+      // Rotate arrow to face target
       projectile.setRotation(angle);
     }
 
