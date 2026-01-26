@@ -780,8 +780,8 @@ export class GameStateManager {
       // Process player auto-attacks
       const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
 
-      // Debug: log current room info occasionally
-      if (currentRoom && Math.random() < 0.01) {
+      // Debug: log current room info (10% of the time to avoid spam)
+      if (currentRoom && Math.random() < 0.10) {
         const aliveEnemies = currentRoom.enemies.filter(e => e.isAlive);
         console.log(`[DEBUG] Processing room ${currentRoom.id}, enemies: ${aliveEnemies.length}, cleared: ${currentRoom.cleared}`);
       }
@@ -1200,15 +1200,15 @@ export class GameStateManager {
             }
 
             if (!nearestPlayer) {
-              // Debug: log why no player was found (occasionally to avoid spam)
-              if (Math.random() < 0.05) {
+              // Debug: log why no player was found (20% of the time)
+              if (Math.random() < 0.20) {
                 const alivePlayers = state.players.filter(p => p.isAlive);
                 const stealthedPlayers = state.players.filter(p => p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth'));
                 console.log(`[DEBUG] Enemy ${enemy.name} found no target. Alive: ${alivePlayers.length}, Stealthed: ${stealthedPlayers.length}`);
                 for (const p of alivePlayers) {
                   const dx = p.position.x - currentRoom.x;
                   const dy = p.position.y - currentRoom.y;
-                  const inRoom = dx >= -80 && dx <= currentRoom.width + 80 && dy >= -80 && dy <= currentRoom.height + 80;
+                  const inRoom = dx >= -200 && dx <= currentRoom.width + 200 && dy >= -200 && dy <= currentRoom.height + 200;
                   console.log(`[DEBUG]   Player ${p.name} pos=(${Math.round(p.position.x)},${Math.round(p.position.y)}) room=(${currentRoom.x},${currentRoom.y},${currentRoom.width}x${currentRoom.height}) inRoom=${inRoom}`);
                 }
               }
