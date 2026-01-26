@@ -1192,6 +1192,18 @@ export class GameStateManager {
             }
 
             if (!nearestPlayer) {
+              // Debug: log why no player was found (only occasionally to avoid spam)
+              if (Math.random() < 0.01) {
+                const alivePlayers = state.players.filter(p => p.isAlive);
+                const stealthedPlayers = state.players.filter(p => p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth'));
+                console.log(`[DEBUG] Enemy ${enemy.name} found no target. Alive: ${alivePlayers.length}, Stealthed: ${stealthedPlayers.length}`);
+                for (const p of alivePlayers) {
+                  const dx = p.position.x - currentRoom.x;
+                  const dy = p.position.y - currentRoom.y;
+                  const inRoom = dx >= -80 && dx <= currentRoom.width + 80 && dy >= -80 && dy <= currentRoom.height + 80;
+                  console.log(`[DEBUG]   Player ${p.name} pos=(${Math.round(p.position.x)},${Math.round(p.position.y)}) room=(${currentRoom.x},${currentRoom.y},${currentRoom.width}x${currentRoom.height}) inRoom=${inRoom}`);
+                }
+              }
               // No valid target found - this is normal when all players are dead, stealthed, or outside room
               // No player in range - check if enemy should leash back to spawn
               if (enemy.spawnPosition && !enemy.isBoss && !enemy.isPatrolling) {
