@@ -2522,8 +2522,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private playEnemyRangedAttackAnimation(enemyId: string, enemyName: string, enemyType: string, position: { x: number; y: number }): void {
+    console.log(`[ANIM] Enemy attack: ${enemyName} (${enemyType}) at (${position.x}, ${position.y})`);
+
     const sprite = this.enemySprites.get(enemyId);
-    if (!sprite) return;
+    if (!sprite) {
+      console.log(`[ANIM] No sprite found for ${enemyId}`);
+      return;
+    }
 
     // Brief scale pulse on the enemy sprite
     this.tweens.add({
@@ -2547,9 +2552,12 @@ export class GameScene extends Phaser.Scene {
     // ARCHER (physical ranged) attack - bow and arrow effect
     // Only for actual archer-type enemies, NOT spectral/magic creatures
     if (isArcher || (enemyType === 'ranged' && !isSpectral && !isVoid && !isDarkMagic)) {
+      console.log(`[ANIM] Playing ARCHER animation for ${enemyName}`);
       this.playArcherAttackAnimation(position);
       return;
     }
+
+    console.log(`[ANIM] Playing MAGIC animation for ${enemyName}: spectral=${isSpectral}, void=${isVoid}, dark=${isDarkMagic}`);
 
     // MAGIC attack - determine effect colors based on enemy name
     let primaryColor = 0x8844ff;
