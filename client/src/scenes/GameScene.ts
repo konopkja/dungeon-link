@@ -2535,33 +2535,41 @@ export class GameScene extends Phaser.Scene {
       ease: 'Quad.easeOut'
     });
 
-    // RANGED (archer/physical) attack - bow and arrow effect
-    if (enemyType === 'ranged') {
+    const nameLower = enemyName.toLowerCase();
+
+    // Check enemy NAME first to determine if it's a magical creature
+    // Spectral enemies (Lost Soul, Wraith, Phantom) are type='ranged' but should have magic effects
+    const isSpectral = nameLower.includes('soul') || nameLower.includes('wraith') || nameLower.includes('phantom') || nameLower.includes('ghost') || nameLower.includes('spirit');
+    const isVoid = nameLower.includes('void') || nameLower.includes('shadow');
+    const isDarkMagic = nameLower.includes('cultist') || nameLower.includes('acolyte') || nameLower.includes('priest') || nameLower.includes('death');
+    const isArcher = nameLower.includes('archer') || nameLower.includes('hunter') || nameLower.includes('ranger') || nameLower.includes('scout') || nameLower.includes('bowman');
+
+    // ARCHER (physical ranged) attack - bow and arrow effect
+    // Only for actual archer-type enemies, NOT spectral/magic creatures
+    if (isArcher || (enemyType === 'ranged' && !isSpectral && !isVoid && !isDarkMagic)) {
       this.playArcherAttackAnimation(position);
       return;
     }
 
-    // CASTER (magic) attack - determine effect colors based on enemy name
+    // MAGIC attack - determine effect colors based on enemy name
     let primaryColor = 0x8844ff;
     let secondaryColor = 0xaa66ff;
     let effectType: 'spectral' | 'dark' | 'void' = 'dark';
 
-    const nameLower = enemyName.toLowerCase();
-
     // Spectral/ghost types - ethereal blue/white
-    if (nameLower.includes('soul') || nameLower.includes('wraith') || nameLower.includes('phantom') || nameLower.includes('ghost') || nameLower.includes('spirit')) {
+    if (isSpectral) {
       primaryColor = 0x88ccff;
       secondaryColor = 0xaaeeff;
       effectType = 'spectral';
     }
     // Void/shadow types - purple/black
-    else if (nameLower.includes('void') || nameLower.includes('shadow')) {
+    else if (isVoid) {
       primaryColor = 0x6622aa;
       secondaryColor = 0x8844cc;
       effectType = 'void';
     }
     // Dark cultist types - green/purple
-    else if (nameLower.includes('cultist') || nameLower.includes('acolyte') || nameLower.includes('priest') || nameLower.includes('death')) {
+    else if (isDarkMagic) {
       primaryColor = 0x44aa44;
       secondaryColor = 0x66cc66;
       effectType = 'dark';
