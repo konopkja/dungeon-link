@@ -2091,27 +2091,48 @@ export class GameStateManager {
    * Find which room contains the given position
    */
   private findRoomAtPosition(state: RunState, position: Position): import('@dungeon-link/shared').Room | null {
-    // Check rooms with some padding for corridors
+    // First, check if strictly inside any room
     for (const room of state.dungeon.rooms) {
-      const padding = 40; // Allow some leeway for corridors
       if (
-        position.x >= room.x - padding &&
-        position.x <= room.x + room.width + padding &&
-        position.y >= room.y - padding &&
-        position.y <= room.y + room.height + padding
+        position.x >= room.x &&
+        position.x <= room.x + room.width &&
+        position.y >= room.y &&
+        position.y <= room.y + room.height
       ) {
-        // Check if actually inside the room (not just near it)
-        if (
-          position.x >= room.x &&
-          position.x <= room.x + room.width &&
-          position.y >= room.y &&
-          position.y <= room.y + room.height
-        ) {
-          return room;
+        return room;
+      }
+    }
+
+    // If not inside any room (in corridor), find the nearest room within padding
+    // Use large padding to account for wide corridors (up to 328px)
+    const corridorPadding = 200;
+    let nearestRoom: import('@dungeon-link/shared').Room | null = null;
+    let nearestDist = Infinity;
+
+    for (const room of state.dungeon.rooms) {
+      // Check if within corridor padding
+      if (
+        position.x >= room.x - corridorPadding &&
+        position.x <= room.x + room.width + corridorPadding &&
+        position.y >= room.y - corridorPadding &&
+        position.y <= room.y + room.height + corridorPadding
+      ) {
+        // Calculate distance to room center
+        const roomCenterX = room.x + room.width / 2;
+        const roomCenterY = room.y + room.height / 2;
+        const dist = Math.sqrt(
+          Math.pow(position.x - roomCenterX, 2) +
+          Math.pow(position.y - roomCenterY, 2)
+        );
+
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestRoom = room;
         }
       }
     }
-    return null;
+
+    return nearestRoom;
   }
 
   /**
