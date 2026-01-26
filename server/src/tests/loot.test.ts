@@ -182,4 +182,83 @@ describe('Stat Recalculation', () => {
 
     expect(player.stats.attackPower).toBe(baseAttack + 15);
   });
+
+  it('should preserve current health when recalculating stats', () => {
+    const player = createTestPlayer();
+
+    // Add equipment that increases max health
+    player.equipment[EquipSlot.Chest] = {
+      id: 'chest',
+      name: 'Health Chest',
+      slot: EquipSlot.Chest,
+      rarity: Rarity.Common,
+      stats: { health: 50 }, // Adds 50 to max health
+      floorDropped: 1
+    };
+
+    // First recalc to get the new max health
+    recalculateStats(player);
+    expect(player.stats.maxHealth).toBe(150); // 100 base + 50 from equipment
+    expect(player.stats.health).toBe(100); // Current health preserved (capped at original)
+
+    // Simulate taking 30 damage
+    player.stats.health = 70;
+
+    // Recalculate again (e.g., when buff is applied)
+    recalculateStats(player);
+
+    // Health should be preserved at 70, not reset to base 100
+    expect(player.stats.health).toBe(70);
+    expect(player.stats.maxHealth).toBe(150);
+  });
+
+  it('should cap current health at new max health if it decreased', () => {
+    const player = createTestPlayer();
+
+    // Add equipment that increases max health
+    player.equipment[EquipSlot.Chest] = {
+      id: 'chest',
+      name: 'Health Chest',
+      slot: EquipSlot.Chest,
+      rarity: Rarity.Common,
+      stats: { health: 50 },
+      floorDropped: 1
+    };
+
+    // Recalc and heal to full
+    recalculateStats(player);
+    player.stats.health = 150; // Full health with equipment
+
+    // Remove the equipment
+    player.equipment[EquipSlot.Chest] = null;
+
+    // Recalculate - health should be capped at new max (100)
+    recalculateStats(player);
+
+    expect(player.stats.maxHealth).toBe(100); // Back to base
+    expect(player.stats.health).toBe(100); // Capped at new max
+  });
+
+  it('should preserve current mana when recalculating stats', () => {
+    const player = createTestPlayer();
+
+    // Simulate using some mana
+    player.stats.mana = 20;
+
+    // Add equipment
+    player.equipment[EquipSlot.Ring] = {
+      id: 'ring',
+      name: 'Mana Ring',
+      slot: EquipSlot.Ring,
+      rarity: Rarity.Common,
+      stats: { mana: 30 },
+      floorDropped: 1
+    };
+
+    recalculateStats(player);
+
+    // Mana should be preserved at 20, maxMana should be 80
+    expect(player.stats.mana).toBe(20);
+    expect(player.stats.maxMana).toBe(80); // 50 base + 30 from ring
+  });
 });

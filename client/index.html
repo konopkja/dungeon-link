@@ -240,6 +240,23 @@
       gap: 12px;
     }
 
+    .preview-video-container {
+      width: 100%;
+      aspect-ratio: 16/9;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+      border: 1px solid #4a4a6a;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    }
+
+    .preview-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
     .preview-screenshots {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -1820,19 +1837,11 @@
             <span>Gameplay Preview</span>
           </div>
           <div class="preview-content">
-            <div class="preview-screenshots">
-              <div class="screenshot combat">
-                <div class="screenshot-icon">&#9876;</div>
-                <div class="screenshot-label">Real-time Combat</div>
-              </div>
-              <div class="screenshot loot">
-                <div class="screenshot-icon">&#128176;</div>
-                <div class="screenshot-label">Legendary Loot</div>
-              </div>
-              <div class="screenshot boss">
-                <div class="screenshot-icon">&#128123;</div>
-                <div class="screenshot-label">Epic Bosses</div>
-              </div>
+            <div class="preview-video-container">
+              <video class="preview-video" autoplay loop muted playsinline>
+                <source src="assets/video.mp4" type="video/mp4">
+                Your browser does not support the video tag.
+              </video>
             </div>
             <div class="preview-features">
               <div class="preview-feature">

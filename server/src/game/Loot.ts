@@ -433,22 +433,25 @@ function applyAbilityDrop(player: Player, abilityId: string): boolean {
 
 /**
  * Recalculate player stats from base + equipment + set bonuses
+ * Preserves current health/mana values (capped at new max)
  */
 export function recalculateStats(player: Player): void {
   const base = player.baseStats;
 
-  // Start with base stats
+  // Preserve current health/mana before recalculating
+  const currentHealth = player.stats.health;
+  const currentMana = player.stats.mana;
+
+  // Start with base stats (using maxHealth/maxMana as starting values for current)
   player.stats = { ...base };
 
-  // Add equipment stats
+  // Add equipment stats (only affects max values, current is restored later)
   for (const slot of Object.values(EquipSlot)) {
     const item = player.equipment[slot];
     if (!item) continue;
 
     const stats = item.stats;
-    player.stats.health += stats.health ?? 0;
     player.stats.maxHealth += stats.health ?? 0;
-    player.stats.mana += stats.mana ?? 0;
     player.stats.maxMana += stats.mana ?? 0;
     player.stats.attackPower += stats.attackPower ?? 0;
     player.stats.spellPower += stats.spellPower ?? 0;
@@ -459,11 +462,9 @@ export function recalculateStats(player: Player): void {
     player.stats.resist += stats.resist ?? 0;
   }
 
-  // Add set bonuses
+  // Add set bonuses (only affects max values, current is restored later)
   const { totalBonusStats } = calculateSetBonuses(player.equipment);
-  player.stats.health += totalBonusStats.health ?? 0;
   player.stats.maxHealth += totalBonusStats.health ?? 0;
-  player.stats.mana += totalBonusStats.mana ?? 0;
   player.stats.maxMana += totalBonusStats.mana ?? 0;
   player.stats.attackPower += totalBonusStats.attackPower ?? 0;
   player.stats.spellPower += totalBonusStats.spellPower ?? 0;
@@ -473,12 +474,11 @@ export function recalculateStats(player: Player): void {
   player.stats.lifesteal += totalBonusStats.lifesteal ?? 0;
   player.stats.resist += totalBonusStats.resist ?? 0;
 
-  // Add buff stat modifiers (e.g., Aspect of the Hawk)
+  // Add buff stat modifiers (e.g., Aspect of the Hawk, Ancestral Spirit)
   for (const buff of player.buffs) {
     if (buff.statModifiers) {
-      player.stats.health += buff.statModifiers.health ?? 0;
+      // Only add maxHealth/maxMana from buffs, not current health/mana
       player.stats.maxHealth += buff.statModifiers.maxHealth ?? 0;
-      player.stats.mana += buff.statModifiers.mana ?? 0;
       player.stats.maxMana += buff.statModifiers.maxMana ?? 0;
       player.stats.attackPower += buff.statModifiers.attackPower ?? 0;
       player.stats.spellPower += buff.statModifiers.spellPower ?? 0;
@@ -489,6 +489,10 @@ export function recalculateStats(player: Player): void {
       player.stats.resist += buff.statModifiers.resist ?? 0;
     }
   }
+
+  // Restore current health/mana, capped at new max values
+  player.stats.health = Math.min(currentHealth, player.stats.maxHealth);
+  player.stats.mana = Math.min(currentMana, player.stats.maxMana);
 }
 
 /**
