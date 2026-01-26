@@ -971,7 +971,7 @@ export class GameStateManager {
               this.eliteAttackCooldowns.set(enemy.id, Math.max(0, eliteCd - deltaTime));
             } else {
               // Find nearest player for targeting (only players in current room)
-              const roomPadding = 80;
+              const roomPadding = 200;
               const alivePlayers = state.players.filter(p => {
                 if (!p.isAlive) return false;
                 if (p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth')) return false;
@@ -1024,7 +1024,7 @@ export class GameStateManager {
               const cdKey = `${enemy.id}_${abilityId}`;
               if ((this.bossAbilityCooldowns.get(cdKey) ?? 0) <= 0) {
                 // Find a target player (exclude stealthed players, only in current room)
-                const roomPadding = 80;
+                const roomPadding = 200;
                 const alivePlayers = state.players.filter(p => {
                   if (!p.isAlive) return false;
                   if (p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth')) return false;
@@ -1075,7 +1075,7 @@ export class GameStateManager {
               this.bossAoECooldowns.set(aoECdKey, Math.max(0, aoECd - deltaTime));
             } else {
               // Spawn an AoE effect based on boss type and floor (exclude stealthed players, only in current room)
-              const roomPadding = 80;
+              const roomPadding = 200;
               const alivePlayers = state.players.filter(p => {
                 if (!p.isAlive) return false;
                 if (p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth')) return false;
@@ -1173,7 +1173,7 @@ export class GameStateManager {
 
               // Check if player is in the current room (with padding for corridors and room transitions)
               // CORRIDOR_WIDTH is 64, so corridors can be up to 128px wide between rooms
-              const roomPadding = 80; // Allow targeting players in corridors (must be > CORRIDOR_WIDTH)
+              const roomPadding = 200; // Allow targeting players in corridors (must be > CORRIDOR_WIDTH)
               const inCurrentRoom =
                 player.position.x >= currentRoom.x - roomPadding &&
                 player.position.x <= currentRoom.x + currentRoom.width + roomPadding &&
