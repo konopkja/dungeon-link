@@ -732,6 +732,7 @@ export class GameStateManager {
           if (newRoom && newRoom.id !== state.dungeon.currentRoomId) {
             const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
             if (currentRoom && (currentRoom.connectedTo.includes(newRoom.id) || currentRoom.cleared)) {
+              console.log(`[DEBUG] Player ${player.name} entered ${newRoom.id} (from ${state.dungeon.currentRoomId}), enemies: ${newRoom.enemies.filter(e => e.isAlive).length}`);
               state.dungeon.currentRoomId = newRoom.id;
 
               // Clear aggro times for enemies in the new room so they have fresh aggro delay
@@ -778,6 +779,13 @@ export class GameStateManager {
 
       // Process player auto-attacks
       const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+
+      // Debug: log current room info occasionally
+      if (currentRoom && Math.random() < 0.01) {
+        const aliveEnemies = currentRoom.enemies.filter(e => e.isAlive);
+        console.log(`[DEBUG] Processing room ${currentRoom.id}, enemies: ${aliveEnemies.length}, cleared: ${currentRoom.cleared}`);
+      }
+
       if (currentRoom && !currentRoom.cleared) {
         for (const player of state.players) {
           if (!player.isAlive || !player.targetId) continue;
