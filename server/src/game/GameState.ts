@@ -731,8 +731,28 @@ export class GameStateManager {
           const newRoom = this.findRoomAtPosition(state, player.position);
           if (newRoom && newRoom.id !== state.dungeon.currentRoomId) {
             const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
-            if (currentRoom && (currentRoom.connectedTo.includes(newRoom.id) || currentRoom.cleared)) {
-              console.log(`[DEBUG] Player ${player.name} entered ${newRoom.id} (from ${state.dungeon.currentRoomId}), enemies: ${newRoom.enemies.filter(e => e.isAlive).length}`);
+
+            // Check if player is STRICTLY inside the new room (not in corridor)
+            const strictlyInsideNewRoom =
+              player.position.x >= newRoom.x &&
+              player.position.x <= newRoom.x + newRoom.width &&
+              player.position.y >= newRoom.y &&
+              player.position.y <= newRoom.y + newRoom.height;
+
+            // Allow transition if:
+            // 1. Player is strictly inside the new room (most reliable), OR
+            // 2. Current room is connected to new room, OR
+            // 3. New room is connected to current room (bidirectional check), OR
+            // 4. Current room is cleared (allows exploring)
+            const isConnected = currentRoom && (
+              currentRoom.connectedTo.includes(newRoom.id) ||
+              newRoom.connectedTo.includes(state.dungeon.currentRoomId)
+            );
+            const isCleared = currentRoom && currentRoom.cleared;
+            const shouldTransition = strictlyInsideNewRoom || isConnected || isCleared;
+
+            if (shouldTransition) {
+              console.log(`[DEBUG] Player ${player.name} entered ${newRoom.id} (from ${state.dungeon.currentRoomId}), enemies: ${newRoom.enemies.filter(e => e.isAlive).length}, strictlyInside: ${strictlyInsideNewRoom}`);
               state.dungeon.currentRoomId = newRoom.id;
 
               // Clear aggro times for enemies in the new room so they have fresh aggro delay
@@ -760,6 +780,11 @@ export class GameStateManager {
 
               // Auto-target closest enemy when entering a new room
               this.autoTargetClosestEnemy(state, player, newRoom);
+            } else {
+              // Debug: log why transition was blocked (rarely)
+              if (Math.random() < 0.05) {
+                console.log(`[DEBUG] Room transition BLOCKED for ${player.name}: currentRoom=${state.dungeon.currentRoomId}, newRoom=${newRoom.id}, strictlyInside=${strictlyInsideNewRoom}, isConnected=${isConnected}, isCleared=${isCleared}`);
+              }
             }
           }
         }
