@@ -3382,14 +3382,14 @@ export class GameScene extends Phaser.Scene {
             sprite.on('pointerover', () => {
               if (chestTooltip) return;
 
-              const tooltipBg = this.add.rectangle(0, 0, 220, 60, 0x1a1a2e, 0.95);
+              const tooltipBg = this.add.rectangle(0, 0, 140, 36, 0x1a1a2e, 0.95);
               tooltipBg.setStrokeStyle(1, 0x4ade80);
 
               const tooltipText = this.add.text(0, 0,
-                '◆ Treasure Chest\nETH reward - collect at Floor 15',
+                '◆ Contains ETH',
                 {
                   fontFamily: 'Crimson Text, serif',
-                  fontSize: '12px',
+                  fontSize: '13px',
                   color: '#4ade80',
                   align: 'center',
                 }

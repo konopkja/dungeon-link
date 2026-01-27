@@ -37,6 +37,7 @@ function formatWeiDisplay(weiString: string): { amount: string; unit: string } {
 // ETH counter component that displays accumulated ETH from boss chests
 export function AccumulatedEthCounter() {
   const [accumulatedEthWei, setAccumulatedEthWei] = useState('0');
+  const [showTooltip, setShowTooltip] = useState(false);
 
   // Listen for ETH drop events
   useEffect(() => {
@@ -63,10 +64,21 @@ export function AccumulatedEthCounter() {
   const { amount, unit } = formatWeiDisplay(accumulatedEthWei);
 
   return (
-    <div className="accumulated-eth-counter">
+    <div
+      className="accumulated-eth-counter"
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+      onClick={() => setShowTooltip(!showTooltip)}
+    >
       <span className="eth-icon">◆</span>
       <span className="eth-amount">{amount}</span>
       <span className="eth-label">{unit}</span>
+      {showTooltip && (
+        <div className="eth-counter-tooltip">
+          Collected from boss chests.<br />
+          Reach Floor 15 solo to claim!
+        </div>
+      )}
     </div>
   );
 }
@@ -174,6 +186,7 @@ export function injectWalletStyles() {
     }
 
     .accumulated-eth-counter {
+      position: relative;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -183,6 +196,7 @@ export function injectWalletStyles() {
       padding: 8px 14px;
       font-family: 'Cinzel', serif;
       animation: ethCounterPulse 2s ease-in-out infinite;
+      cursor: pointer;
     }
 
     .accumulated-eth-counter .eth-icon {
@@ -203,6 +217,36 @@ export function injectWalletStyles() {
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+    }
+
+    .eth-counter-tooltip {
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      margin-top: 8px;
+      padding: 10px 14px;
+      background: rgba(26, 26, 46, 0.98);
+      border: 1px solid rgba(74, 222, 128, 0.5);
+      border-radius: 6px;
+      font-family: 'Crimson Text', serif;
+      font-size: 13px;
+      color: #4ade80;
+      text-align: center;
+      white-space: nowrap;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .eth-counter-tooltip::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 6px solid rgba(74, 222, 128, 0.5);
     }
 
     @keyframes ethCounterPulse {
