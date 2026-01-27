@@ -52,7 +52,35 @@ export function initializeCryptoState(runId: string): CryptoState {
   };
 
   runCryptoStates.set(runId, state);
+
+  // Fetch pool status immediately (without requiring wallet connection)
+  checkPoolFunds(runId);
+
   return state;
+}
+
+/**
+ * Check if pool has funds (update state without sending to client)
+ */
+async function checkPoolFunds(runId: string): Promise<void> {
+  try {
+    const poolBalance = await publicClient.readContract({
+      address: VAULT_ADDRESS,
+      abi: [parseAbiItem('function getRewardPool() view returns (uint256)')],
+      functionName: 'getRewardPool',
+    });
+
+    const hasPoolFunds = poolBalance > 0n;
+
+    updateCryptoState(runId, {
+      rewardPoolWei: poolBalance.toString(),
+      hasPoolFunds,
+    });
+
+    console.log(`[Crypto] Pool status for run ${runId}: ${poolBalance.toString()} wei, hasPoolFunds: ${hasPoolFunds}`);
+  } catch (error) {
+    console.error('[Crypto] Failed to check pool funds:', error);
+  }
 }
 
 /**

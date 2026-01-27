@@ -3374,6 +3374,43 @@ export class GameScene extends Phaser.Scene {
             sprite.setScale(2.7); // Rare chests slightly bigger
           }
 
+          // Add tooltip for boss room chests
+          if (room.type === 'boss') {
+            let chestTooltip: Phaser.GameObjects.Container | null = null;
+            const chestSprite = sprite; // Capture reference for closures
+
+            sprite.on('pointerover', () => {
+              if (chestTooltip) return;
+
+              const tooltipBg = this.add.rectangle(0, 0, 220, 60, 0x1a1a2e, 0.95);
+              tooltipBg.setStrokeStyle(1, 0x4ade80);
+
+              const tooltipText = this.add.text(0, 0,
+                '◆ Treasure Chest\nETH reward - collect at Floor 15',
+                {
+                  fontFamily: 'Crimson Text, serif',
+                  fontSize: '12px',
+                  color: '#4ade80',
+                  align: 'center',
+                }
+              ).setOrigin(0.5);
+
+              chestTooltip = this.add.container(
+                chestSprite.x,
+                chestSprite.y - 50,
+                [tooltipBg, tooltipText]
+              );
+              chestTooltip.setDepth(1500);
+            });
+
+            sprite.on('pointerout', () => {
+              if (chestTooltip) {
+                chestTooltip.destroy();
+                chestTooltip = null;
+              }
+            });
+          }
+
           this.chestSprites.set(chest.id, sprite);
         }
 
