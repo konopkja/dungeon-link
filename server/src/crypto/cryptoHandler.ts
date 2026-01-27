@@ -10,14 +10,14 @@ import {
   getCryptoVendorServices,
   calculateBossEthDrop,
   MAX_PURCHASES_PER_FLOOR,
-} from '../data/cryptoPotions';
+} from '../data/cryptoPotions.js';
 import {
   generateAccountId,
   generateClaimAttestation,
   hasAccountClaimed,
   markAccountClaimed,
   isSignerAvailable,
-} from './attestation';
+} from './attestation.js';
 import { createPublicClient, http, parseAbiItem } from 'viem';
 import { base } from 'viem/chains';
 
