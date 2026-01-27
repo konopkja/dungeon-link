@@ -348,6 +348,7 @@ export interface Room {
   connectedTo: string[];
   vendor?: Vendor; // Trainer NPC
   shopVendor?: Vendor; // Shop vendor NPC for selling items
+  cryptoVendor?: CryptoVendor; // Crypto potion vendor
   groundItems?: GroundItem[]; // Items dropped on the ground
   traps?: Trap[];    // Room traps (spikes, flamethrowers)
   chests?: Chest[];  // Lootable chests
@@ -441,6 +442,8 @@ export interface RunState {
     damageMultiplier: number;
   };
   groundEffects: GroundEffect[];
+  // Crypto state (per-run tracking)
+  cryptoState?: CryptoState;
 }
 
 // ============================================
@@ -463,7 +466,14 @@ export type ClientMessage =
   | { type: 'PURCHASE_SERVICE'; vendorId: string; serviceType: 'level_up' | 'train_ability' | 'sell_item' | 'sell_all'; abilityId?: string; itemId?: string }
   | { type: 'PICKUP_GROUND_ITEM'; itemId: string } // Manual click-to-pickup
   | { type: 'OPEN_CHEST'; chestId: string } // Open a chest
-  | { type: 'PING' };
+  | { type: 'PING' }
+  // Crypto messages
+  | { type: 'CONNECT_WALLET'; walletAddress: string }
+  | { type: 'DISCONNECT_WALLET' }
+  | { type: 'GET_CRYPTO_VENDOR_SERVICES' }
+  | { type: 'VERIFY_CRYPTO_PURCHASE'; txHash: string; potionType: PotionType; paymentToken: PaymentToken }
+  | { type: 'REQUEST_CLAIM_ATTESTATION' }
+  | { type: 'GET_POOL_STATUS' };
 
 export interface PlayerInput {
   moveX: number;
@@ -490,7 +500,18 @@ export type ServerMessage =
   | { type: 'CHEST_OPENED'; chestId: string; playerId: string; loot: string[] } // Chest opened with loot descriptions
   | { type: 'TRAP_TRIGGERED'; trapId: string; playerId: string; damage: number } // Player hit by trap
   | { type: 'POTION_USED'; playerId: string; potionType: 'health' | 'mana' } // Player used a potion
-  | { type: 'PONG' };
+  | { type: 'PONG' }
+  // Crypto messages
+  | { type: 'WALLET_CONNECTED'; walletAddress: string; cryptoAccountId: string }
+  | { type: 'WALLET_DISCONNECTED' }
+  | { type: 'CRYPTO_VENDOR_SERVICES'; services: CryptoVendorService[]; purchasesRemaining: number }
+  | { type: 'CRYPTO_PURCHASE_VERIFIED'; potion: CryptoPotion; purchasesRemaining: number }
+  | { type: 'CRYPTO_PURCHASE_FAILED'; reason: string }
+  | { type: 'CHEST_ETH_DROP'; floorNumber: number; ethAmountWei: string; totalAccumulatedWei: string }
+  | { type: 'CLAIM_ATTESTATION'; signature: string; accountId: string; ethAmountWei: string; walletAddress: string }
+  | { type: 'CLAIM_NOT_ELIGIBLE'; reason: string }
+  | { type: 'POOL_STATUS'; rewardPoolWei: string; hasPoolFunds: boolean }
+  | { type: 'CRYPTO_STATE_UPDATE'; cryptoState: CryptoState };
 
 export interface CombatEvent {
   sourceId: string;
@@ -581,4 +602,96 @@ export interface SaveData {
   backpack: (Item | Potion)[];
   highestFloor: number;
   lives: number; // 5 lives max, character deleted when 0
+  // Crypto claim tracking
+  cryptoAccountId?: string; // Unique account ID for crypto claims
+  hasClaimed?: boolean; // Whether this account has claimed crypto rewards
 }
+
+// ============================================
+// CRYPTO SYSTEM
+// ============================================
+
+export enum PaymentToken {
+  ETH = 'eth',
+  USDC = 'usdc',
+  USDT = 'usdt'
+}
+
+export enum CryptoPotionQuality {
+  Minor = 'minor',       // 40% chance - heals 15%
+  Standard = 'standard', // 35% chance - heals 25%
+  Greater = 'greater',   // 20% chance - heals 40%
+  Superior = 'superior'  // 5% chance - heals 60%
+}
+
+export interface CryptoPotion {
+  id: string;
+  type: PotionType;
+  quality: CryptoPotionQuality;
+  healPercent: number; // Percentage of max health/mana restored
+  name: string;
+}
+
+export interface CryptoVendorService {
+  type: 'buy_potion';
+  potionType: PotionType;
+  priceUsd: string; // Display price
+  prices: {
+    [PaymentToken.ETH]: string;
+    [PaymentToken.USDC]: string;
+    [PaymentToken.USDT]: string;
+  };
+}
+
+export interface CryptoState {
+  // Wallet connection
+  walletAddress?: string;
+  isWalletConnected: boolean;
+
+  // Floor purchase tracking
+  purchasesThisFloor: number;
+  maxPurchasesPerFloor: number; // Always 5
+
+  // Boss ETH drops (accumulated during run)
+  accumulatedEthWei: string; // BigInt as string for serialization
+
+  // Pool status
+  hasPoolFunds: boolean;
+  rewardPoolWei: string; // Current pool balance
+
+  // Claim status
+  canClaim: boolean; // True after beating floor 15 boss solo
+  hasClaimed: boolean; // Already claimed this account
+}
+
+// Crypto vendor type for Room
+export interface CryptoVendor {
+  id: string;
+  name: string;
+  position: Position;
+  vendorType: 'crypto';
+}
+
+// ============================================
+// CRYPTO NETWORK MESSAGES
+// ============================================
+
+export type CryptoClientMessage =
+  | { type: 'CONNECT_WALLET'; walletAddress: string }
+  | { type: 'DISCONNECT_WALLET' }
+  | { type: 'GET_CRYPTO_VENDOR_SERVICES' }
+  | { type: 'VERIFY_CRYPTO_PURCHASE'; txHash: string; potionType: PotionType; paymentToken: PaymentToken }
+  | { type: 'REQUEST_CLAIM_ATTESTATION' }
+  | { type: 'GET_POOL_STATUS' };
+
+export type CryptoServerMessage =
+  | { type: 'WALLET_CONNECTED'; walletAddress: string; cryptoAccountId: string }
+  | { type: 'WALLET_DISCONNECTED' }
+  | { type: 'CRYPTO_VENDOR_SERVICES'; services: CryptoVendorService[]; purchasesRemaining: number }
+  | { type: 'CRYPTO_PURCHASE_VERIFIED'; potion: CryptoPotion; purchasesRemaining: number }
+  | { type: 'CRYPTO_PURCHASE_FAILED'; reason: string }
+  | { type: 'CHEST_ETH_DROP'; floorNumber: number; ethAmountWei: string; totalAccumulatedWei: string }
+  | { type: 'CLAIM_ATTESTATION'; signature: string; accountId: string; ethAmountWei: string; walletAddress: string }
+  | { type: 'CLAIM_NOT_ELIGIBLE'; reason: string }
+  | { type: 'POOL_STATUS'; rewardPoolWei: string; hasPoolFunds: boolean }
+  | { type: 'CRYPTO_STATE_UPDATE'; cryptoState: CryptoState };

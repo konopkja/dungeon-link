@@ -3,6 +3,19 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { ClientMessage, ServerMessage, ClassName } from '@dungeon-link/shared';
 import { WS_CONFIG, GAME_CONFIG } from '@dungeon-link/shared';
 import { gameStateManager } from './game/GameState.js';
+import {
+  handleWalletConnect,
+  handleWalletDisconnect,
+  handleGetCryptoVendorServices,
+  handleVerifyCryptoPurchase,
+  handleRequestClaimAttestation,
+  handleGetPoolStatus,
+  handleBossChestOpened,
+  initializeCryptoState,
+  cleanupCryptoState,
+  resetFloorPurchases,
+} from './crypto/cryptoHandler.js';
+import { initializeSigner } from './crypto/attestation.js';
 
 interface ClientConnection {
   ws: WebSocket;
@@ -44,6 +57,9 @@ export class GameWebSocketServer {
       console.log(`Server started on port ${port} (HTTP + WebSocket)`);
     });
 
+    // Initialize crypto signer
+    initializeSigner();
+
     // Start game loop
     this.startGameLoop();
   }
@@ -80,6 +96,12 @@ export class GameWebSocketServer {
             type: 'PLAYER_LEFT',
             playerId: client.playerId
           }, client.ws);
+
+          // Clean up crypto state if this was the last player
+          const runPlayers = Array.from(this.clients.values()).filter(c => c.runId === client.runId && c !== client);
+          if (runPlayers.length === 0) {
+            cleanupCryptoState(client.runId);
+          }
         }
       }
       this.clients.delete(ws);
@@ -100,6 +122,9 @@ export class GameWebSocketServer {
           client.playerId = result.playerId;
           client.runId = result.runId;
 
+          // Initialize crypto state for this run
+          initializeCryptoState(result.runId);
+
           console.log('[DEBUG] Sending RUN_CREATED response');
           this.send(client.ws, {
             type: 'RUN_CREATED',
@@ -117,6 +142,9 @@ export class GameWebSocketServer {
         const result = gameStateManager.createRunFromSave(message.saveData);
         client.playerId = result.playerId;
         client.runId = result.runId;
+
+        // Initialize crypto state for this run
+        initializeCryptoState(result.runId);
 
         this.send(client.ws, {
           type: 'RUN_CREATED',
@@ -186,6 +214,9 @@ export class GameWebSocketServer {
 
         const state = gameStateManager.advanceFloor(client.runId);
         if (state) {
+          // Reset crypto purchases for new floor
+          resetFloorPurchases(client.runId);
+
           this.broadcastToRun(client.runId, {
             type: 'FLOOR_COMPLETE',
             floor: state.floor
@@ -285,7 +316,55 @@ export class GameWebSocketServer {
             playerId: client.playerId,
             loot: chestResult.lootDescriptions
           });
+
+          // Trigger ETH drop for boss room chests
+          if (chestResult.isBossRoomChest) {
+            handleBossChestOpened(client.runId, chestResult.floor, chestResult.isSolo, client.ws);
+          }
         }
+        break;
+      }
+
+      // Crypto messages
+      case 'CONNECT_WALLET': {
+        if (!client.runId) return;
+        handleWalletConnect(client.runId, message.walletAddress, client.ws);
+        break;
+      }
+
+      case 'DISCONNECT_WALLET': {
+        if (!client.runId) return;
+        handleWalletDisconnect(client.runId, client.ws);
+        break;
+      }
+
+      case 'GET_CRYPTO_VENDOR_SERVICES': {
+        if (!client.runId) return;
+        handleGetCryptoVendorServices(client.runId, client.ws);
+        break;
+      }
+
+      case 'VERIFY_CRYPTO_PURCHASE': {
+        if (!client.runId) return;
+        handleVerifyCryptoPurchase(
+          client.runId,
+          message.txHash,
+          message.potionType,
+          message.paymentToken,
+          client.ws
+        );
+        break;
+      }
+
+      case 'REQUEST_CLAIM_ATTESTATION': {
+        if (!client.runId) return;
+        handleRequestClaimAttestation(client.runId, client.ws);
+        break;
+      }
+
+      case 'GET_POOL_STATUS': {
+        if (!client.runId) return;
+        handleGetPoolStatus(client.runId, client.ws);
         break;
       }
     }

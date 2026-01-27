@@ -1,4 +1,4 @@
-import { Player, Vendor, VendorService, Room, PlayerAbility, AbilityType, Item } from '@dungeon-link/shared';
+import { Player, Vendor, VendorService, Room, PlayerAbility, AbilityType, Item, CryptoVendor } from '@dungeon-link/shared';
 import { GAME_CONFIG } from '@dungeon-link/shared';
 import { getXPForLevel } from '../data/leveling.js';
 import { getAbilityById } from '../data/classes.js';
@@ -41,6 +41,15 @@ const SHOP_NAMES = [
   'Broker Thalia',
 ];
 
+const CRYPTO_VENDOR_NAMES = [
+  'Alchemist Zephyr',
+  'Mystic Brewer',
+  'Elixir Merchant',
+  'Potion Master',
+  'Arcane Apothecary',
+  'Ethereal Vendor',
+];
+
 /**
  * Create a trainer NPC for a room (positioned in top-left corner)
  */
@@ -74,6 +83,24 @@ export function createShopVendor(room: Room, floor: number): Vendor {
       y: room.y + 60,
     },
     vendorType: 'shop',
+  };
+}
+
+/**
+ * Create a crypto vendor NPC for a room (positioned in bottom-left corner)
+ */
+export function createCryptoVendor(room: Room, floor: number): CryptoVendor {
+  const vendorId = `crypto_${room.id}`;
+  const name = CRYPTO_VENDOR_NAMES[Math.floor(Math.random() * CRYPTO_VENDOR_NAMES.length)];
+
+  return {
+    id: vendorId,
+    name,
+    position: {
+      x: room.x + 60, // Bottom-left corner with padding
+      y: room.y + room.height - 60,
+    },
+    vendorType: 'crypto',
   };
 }
 

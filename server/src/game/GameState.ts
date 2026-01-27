@@ -5,7 +5,7 @@ import {
   GroundEffect, GroundEffectType, SaveData, VendorService, TargetType, GroundItem,
   Trap, Chest, TrapType, FloorTheme, EnemyType
 } from '@dungeon-link/shared';
-import { getVendorServices, purchaseLevelUp, purchaseAbilityTrain, createVendor, createShopVendor, getShopServices, sellItem, sellAllItems } from './Vendor.js';
+import { getVendorServices, purchaseLevelUp, purchaseAbilityTrain, createVendor, createShopVendor, createCryptoVendor, getShopServices, sellItem, sellAllItems } from './Vendor.js';
 import { GAME_CONFIG, SPRITE_CONFIG } from '@dungeon-link/shared';
 import { generateDungeon, getPlayerSpawnPosition } from './DungeonGenerator.js';
 import { getClassById, getBaselineAbilities, getAbilityById } from '../data/classes.js';
@@ -2502,7 +2502,7 @@ export class GameStateManager {
   /**
    * Open a chest and get loot
    */
-  openChest(runId: string, playerId: string, chestId: string): { lootDescriptions: string[] } | null {
+  openChest(runId: string, playerId: string, chestId: string): { lootDescriptions: string[]; isBossRoomChest: boolean; floor: number; isSolo: boolean } | null {
     const state = this.runs.get(runId);
     if (!state) return null;
 
@@ -2573,7 +2573,7 @@ export class GameStateManager {
         room.cleared = false;
 
         console.log(`[DEBUG] Player ${player.name} triggered a MIMIC! Spawned at chest ${chest.id}`);
-        return { lootDescriptions: ['IT\'S A MIMIC!'] };
+        return { lootDescriptions: ['IT\'S A MIMIC!'], isBossRoomChest: false, floor: state.floor, isSolo: state.players.length === 1 };
       }
 
       // Open the chest
@@ -2635,8 +2635,9 @@ export class GameStateManager {
         }
       }
 
-      console.log(`[DEBUG] Player ${player.name} opened ${chest.lootTier} chest: ${lootDescriptions.join(', ')}`);
-      return { lootDescriptions };
+      const isBossRoomChest = room.type === 'boss';
+      console.log(`[DEBUG] Player ${player.name} opened ${chest.lootTier} chest: ${lootDescriptions.join(', ')} (boss room: ${isBossRoomChest})`);
+      return { lootDescriptions, isBossRoomChest, floor: state.floor, isSolo: state.players.length === 1 };
     }
 
     return null;
@@ -2973,7 +2974,7 @@ export class GameStateManager {
   }
 
   /**
-   * Spawn vendors (trainer and shop) in the start room
+   * Spawn vendors (trainer, shop, and crypto) in the start room
    */
   private spawnVendorInStartRoom(state: RunState): void {
     console.log('[DEBUG] spawnVendorInStartRoom - rooms:', state.dungeon.rooms.map(r => ({ id: r.id, type: r.type })));
@@ -2989,6 +2990,11 @@ export class GameStateManager {
       if (!startRoom.shopVendor) {
         startRoom.shopVendor = createShopVendor(startRoom, state.floor);
         console.log('[DEBUG] spawnVendorInStartRoom - created shop vendor:', startRoom.shopVendor);
+      }
+      // Spawn crypto vendor in bottom-left corner
+      if (!startRoom.cryptoVendor) {
+        startRoom.cryptoVendor = createCryptoVendor(startRoom, state.floor);
+        console.log('[DEBUG] spawnVendorInStartRoom - created crypto vendor:', startRoom.cryptoVendor);
       }
     } else {
       console.log('[DEBUG] spawnVendorInStartRoom - no startRoom found');

@@ -6,6 +6,7 @@ import { UIScene } from './scenes/UIScene';
 import { LootScene } from './scenes/LootScene';
 import { SaveData } from '@dungeon-link/shared';
 import { wsClient } from './network/WebSocketClient';
+import { initWalletUI } from './wallet';
 
 // Leaderboard storage key
 const LEADERBOARD_KEY = 'dungeonlink_leaderboard';
@@ -439,6 +440,9 @@ document.addEventListener('DOMContentLoaded', () => {
   renderCharacterList();
   renderLeaderboard();
   renderActivityFeed();
+
+  // Initialize wallet UI (React overlay)
+  initWalletUI();
 
   // Setup button handlers
   const newCharBtn = document.getElementById('new-character-btn');

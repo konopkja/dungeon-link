@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { Player, Enemy, Room, ServerMessage, EnemyType, Potion, PotionType, Pet, GroundEffect, GroundEffectType, AbilityType, VendorService, Vendor, GroundItem, Trap, Chest, TrapType, FloorTheme, FloorThemeModifiers } from '@dungeon-link/shared';
 import { CLASS_COLORS, SPRITE_CONFIG, ENEMY_TYPE_COLORS, getAbilityById, calculateAbilityDamage, calculateAbilityHeal } from '@dungeon-link/shared';
+import { openCryptoVendor, updatePurchasesRemaining, emitWalletEvent, openVendor, closeVendor, updateVendor, onWalletEvent } from '../wallet';
 import { wsClient } from '../network/WebSocketClient';
 import { InputManager } from '../systems/InputManager';
 import { AbilitySystem } from '../systems/AbilitySystem';
@@ -99,10 +100,9 @@ export class GameScene extends Phaser.Scene {
 
   // Vendor
   private vendorSprites: Map<string, Phaser.GameObjects.Container> = new Map();
-  private vendorUI: Phaser.GameObjects.Container | null = null;
-  private vendorUIButtons: Phaser.GameObjects.GameObject[] = []; // Separate array for buttons
   private currentVendorId: string | null = null;
   private vendorServices: VendorService[] = [];
+  private vendorModalOpen: boolean = false;
 
   private messageUnsubscribe: (() => void) | null = null;
 
@@ -254,10 +254,8 @@ export class GameScene extends Phaser.Scene {
       this.notifiedEnemyIds.clear();
       this.vendorServices = [];
       this.currentVendorId = null;
-      safeDestroy(this.vendorUI);
-      this.vendorUI = null;
-      this.vendorUIButtons.forEach(btn => safeDestroy(btn));
-      this.vendorUIButtons = [];
+      this.vendorModalOpen = false;
+      closeVendor();
       this.cooldownTexts.forEach(t => safeDestroy(t));
       this.cooldownTexts = [];
       this.cooldownOverlays.forEach(o => safeDestroy(o));
@@ -3864,10 +3862,11 @@ export class GameScene extends Phaser.Scene {
     const activeVendorIds = new Set<string>();
 
     for (const room of rooms) {
-      // Collect all vendors in this room (trainer and shop)
-      const vendors: Vendor[] = [];
+      // Collect all vendors in this room (trainer, shop, and crypto)
+      const vendors: (Vendor | import('@dungeon-link/shared').CryptoVendor)[] = [];
       if (room.vendor) vendors.push(room.vendor);
       if (room.shopVendor) vendors.push(room.shopVendor);
+      if (room.cryptoVendor) vendors.push(room.cryptoVendor);
 
       for (const vendor of vendors) {
         activeVendorIds.add(vendor.id);
@@ -3879,15 +3878,18 @@ export class GameScene extends Phaser.Scene {
           container = this.add.container(vendor.position.x, vendor.position.y);
 
           const isShop = vendor.vendorType === 'shop';
-          const spriteKey = isShop ? 'npc_vendor' : 'npc_trainer';
-          const nameColor = isShop ? '#ffcc44' : '#44ff44';
-          const fallbackColor = isShop ? 0x886622 : 0x228833;
-          const fallbackStroke = isShop ? 0xddaa44 : 0x44dd55;
+          const isCrypto = vendor.vendorType === 'crypto';
+          // For crypto vendor, use priest sprite; otherwise use npc_vendor or npc_trainer
+          const spriteKey = isCrypto ? 'player_priest' : isShop ? 'npc_vendor' : 'npc_trainer';
+          const nameColor = isCrypto ? '#9966ff' : isShop ? '#ffcc44' : '#44ff44';
+          const fallbackColor = isCrypto ? 0x663399 : isShop ? 0x886622 : 0x228833;
+          const fallbackStroke = isCrypto ? 0x9966ff : isShop ? 0xddaa44 : 0x44dd55;
 
           // Use appropriate sprite if available, otherwise fallback to graphics
           if (this.textures.exists(spriteKey)) {
             const sprite = this.add.image(0, 0, spriteKey);
-            sprite.setScale(0.22); // Slightly larger than player characters for visibility
+            // Crypto vendor (priest) needs different scale than NPC sprites
+            sprite.setScale(isCrypto ? 0.18 : 0.22);
             container.add(sprite);
           } else {
             // Fallback: Vendor body
@@ -3898,7 +3900,15 @@ export class GameScene extends Phaser.Scene {
             body.strokeCircle(0, 0, 20);
 
             // Icon based on type
-            if (isShop) {
+            if (isCrypto) {
+              // Potion flask icon for crypto vendor
+              body.fillStyle(0x00ff88, 1);
+              body.fillRect(-4, -8, 8, 12);
+              body.fillStyle(0xaaaaaa, 1);
+              body.fillRect(-3, -12, 6, 4);
+              body.fillStyle(0x00ff88, 0.5);
+              body.fillCircle(0, 2, 6);
+            } else if (isShop) {
               // Coin/gold icon for shop
               body.fillStyle(0xffd700, 1);
               body.fillCircle(0, 0, 10);
@@ -3926,10 +3936,11 @@ export class GameScene extends Phaser.Scene {
           container.add(nameText);
 
           // Type label under name
-          const typeLabel = this.add.text(0, -22, isShop ? '(Shop)' : '(Trainer)', {
+          const typeLabelText = isCrypto ? '(Alchemist)' : isShop ? '(Shop)' : '(Trainer)';
+          const typeLabel = this.add.text(0, -22, typeLabelText, {
             fontFamily: FONTS.body,
             fontSize: '9px',
-            color: '#888888'
+            color: isCrypto ? '#9966ff' : '#888888'
           }).setOrigin(0.5);
           container.add(typeLabel);
 
@@ -3948,10 +3959,15 @@ export class GameScene extends Phaser.Scene {
           hitArea.setInteractive({ useHandCursor: true });
           hitArea.on('pointerdown', () => {
             // Don't open vendor UI if already open
-            if (this.vendorUI) {
+            if (this.vendorModalOpen) {
               return;
             }
-            wsClient.send({ type: 'INTERACT_VENDOR', vendorId: vendor.id });
+            if (isCrypto) {
+              // Open crypto vendor modal and request services from server
+              wsClient.send({ type: 'GET_CRYPTO_VENDOR_SERVICES' });
+            } else {
+              wsClient.send({ type: 'INTERACT_VENDOR', vendorId: vendor.id });
+            }
           });
           hitArea.on('pointerover', () => {
             hintText.setColor('#ffffff');
@@ -3980,292 +3996,34 @@ export class GameScene extends Phaser.Scene {
 
   private showVendorUI(): void {
     console.log('[DEBUG] showVendorUI called, services:', this.vendorServices);
-    // Close existing vendor UI but don't clear services
-    this.closeVendorUI(false);
 
     // Determine if this is a shop vendor by checking the vendor ID or service types
     const isShop = this.currentVendorId?.startsWith('shop_') ||
       this.vendorServices.some(s => s.type === 'sell_item' || s.type === 'sell_all');
 
-    const width = this.cameras.main.width;
-    const height = this.cameras.main.height;
-    const panelWidth = 480; // Wider for 14px+ fonts
-    // Calculate dynamic height based on services
-    const headerHeight = 100; // Title + gold display
-    const footerHeight = 50; // Hint text
-    const sellAllHeight = 90; // Sell all section if present
-    const serviceBaseHeight = 85; // Base height per service (flexible)
-
-    const hasSellAll = this.vendorServices.some(s => s.type === 'sell_all');
-    const regularServices = this.vendorServices.filter(s => s.type !== 'sell_all');
-    const contentHeight = (hasSellAll ? sellAllHeight : 0) + regularServices.length * serviceBaseHeight;
-    const panelHeight = Math.min(550, Math.max(200, headerHeight + contentHeight + footerHeight));
-
-    const x = width / 2;
-    const y = height / 2;
-
-    this.vendorUI = this.add.container(x, y).setScrollFactor(0).setDepth(1000);
-
-    // Background - make interactive to block clicks from going through
-    const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, COLORS.panelBg, 0.97);
-    bg.setStrokeStyle(2, COLORS.border);
-    bg.setInteractive(); // Block clicks from propagating
-    this.vendorUI.add(bg);
-
-    // Gold corner decorations (matching landing page panels)
-    const cornerGraphics = this.add.graphics();
-    const cornerSize = PANEL.cornerSize;
-    cornerGraphics.lineStyle(2, COLORS.borderGold);
-
-    // Top-left corner
-    cornerGraphics.beginPath();
-    cornerGraphics.moveTo(-panelWidth/2, -panelHeight/2 + cornerSize);
-    cornerGraphics.lineTo(-panelWidth/2, -panelHeight/2);
-    cornerGraphics.lineTo(-panelWidth/2 + cornerSize, -panelHeight/2);
-    cornerGraphics.strokePath();
-
-    // Bottom-right corner
-    cornerGraphics.beginPath();
-    cornerGraphics.moveTo(panelWidth/2, panelHeight/2 - cornerSize);
-    cornerGraphics.lineTo(panelWidth/2, panelHeight/2);
-    cornerGraphics.lineTo(panelWidth/2 - cornerSize, panelHeight/2);
-    cornerGraphics.strokePath();
-    this.vendorUI.add(cornerGraphics);
-
-    // Title with decorative underline
-    const titleText = isShop ? 'Shop - Sell Items' : 'Trainer';
-    const title = this.add.text(0, -panelHeight / 2 + 28, titleText, {
-      fontFamily: FONTS.title,
-      fontSize: '22px',
-      color: COLORS_HEX.goldLight,
-      stroke: '#000000',
-      strokeThickness: 2
-    }).setOrigin(0.5);
-    this.vendorUI.add(title);
-
-    // Title underline with gold accent
-    const underlineGraphics = this.add.graphics();
-    underlineGraphics.lineStyle(1, COLORS.border);
-    underlineGraphics.lineBetween(-panelWidth/2 + 15, -panelHeight/2 + 52, panelWidth/2 - 15, -panelHeight/2 + 52);
-    underlineGraphics.lineStyle(2, COLORS.borderGold);
-    underlineGraphics.lineBetween(-40, -panelHeight/2 + 52, 40, -panelHeight/2 + 52);
-    this.vendorUI.add(underlineGraphics);
-
-    // Close button - styled consistently
-    const closeBtnX = x + panelWidth / 2 - 22;
-    const closeBtnY = y - panelHeight / 2 + 20;
-    const closeBtnBg = this.add.rectangle(closeBtnX, closeBtnY, 30, 30, 0x3d3d5c, 0.9);
-    closeBtnBg.setStrokeStyle(1, 0x5a5a7a);
-    closeBtnBg.setScrollFactor(0);
-    closeBtnBg.setDepth(1001);
-    closeBtnBg.setInteractive({ useHandCursor: true });
-
-    const closeBtnText = this.add.text(closeBtnX, closeBtnY - 1, '×', {
-      fontFamily: FONTS.body, fontSize: '22px', color: '#aaaaaa',
-      stroke: '#000000', strokeThickness: 1
-    }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(1001);
-
-    closeBtnBg.on('pointerover', () => {
-      closeBtnBg.setFillStyle(0x884444);
-      closeBtnText.setColor('#ffffff');
-    });
-    closeBtnBg.on('pointerout', () => {
-      closeBtnBg.setFillStyle(0x3d3d5c);
-      closeBtnText.setColor('#aaaaaa');
-    });
-    closeBtnBg.on('pointerdown', () => this.closeVendorUI());
-
-    this.vendorUIButtons.push(closeBtnBg);
-    this.vendorUIButtons.push(closeBtnText);
-
-    // Gold display
     const player = wsClient.getCurrentPlayer();
-    const goldText = this.add.text(0, -panelHeight / 2 + 68, `Your Gold: ${player?.gold ?? 0}`, {
-      fontFamily: FONTS.body,
-      fontSize: '16px',
-      color: '#ffd700',
-      stroke: '#000000',
-      strokeThickness: 1
-    }).setOrigin(0.5);
-    this.vendorUI.add(goldText);
 
-    // No items message for empty shop
-    if (isShop && this.vendorServices.length === 0) {
-      const noItemsText = this.add.text(0, 0, 'No items to sell.\nPick up items from enemies\nand come back!', {
-        fontFamily: FONTS.body,
-        fontSize: '16px',
-        color: '#888888',
-        align: 'center',
-        stroke: '#000000',
-        strokeThickness: 1
-      }).setOrigin(0.5);
-      this.vendorUI.add(noItemsText);
-    }
+    // Open the React vendor modal
+    openVendor(
+      this.currentVendorId || '',
+      isShop ? 'shop' : 'trainer',
+      this.vendorServices,
+      player?.gold ?? 0
+    );
 
-    // Services list - sort so sell_all comes first
-    const sortedServices = [...this.vendorServices].sort((a, b) => {
-      if (a.type === 'sell_all') return -1;
-      if (b.type === 'sell_all') return 1;
-      return 0;
+    this.vendorModalOpen = true;
+
+    // Listen for vendor-closed event to reset state
+    const unsubClose = onWalletEvent('vendor-closed', () => {
+      this.closeVendorUI();
+      unsubClose();
     });
-
-    let yOffset = -panelHeight / 2 + 100;
-
-    for (const service of sortedServices) {
-      const isSellAll = service.type === 'sell_all';
-      const isSellService = service.type === 'sell_item' || isSellAll;
-
-      // Sell All gets special treatment - bigger, gold colored
-      if (isSellAll) {
-        const sellAllSectionHeight = 80;
-        const sellAllBg = this.add.rectangle(0, yOffset + sellAllSectionHeight / 2, panelWidth - 24, sellAllSectionHeight, 0x443311, 0.95);
-        sellAllBg.setStrokeStyle(3, 0xffaa00);
-        this.vendorUI.add(sellAllBg);
-
-        // Sell All title
-        const sellAllTitle = this.add.text(0, yOffset + 18, 'SELL ALL ITEMS', {
-          fontFamily: FONTS.title,
-          fontSize: '18px',
-          color: '#ffdd00',
-          stroke: '#000000',
-          strokeThickness: 2
-        }).setOrigin(0.5);
-        this.vendorUI.add(sellAllTitle);
-
-        // Gold amount - big and prominent
-        const goldAmount = this.add.text(0, yOffset + 48, `+${service.cost} GOLD`, {
-          fontFamily: FONTS.title,
-          fontSize: '20px',
-          color: '#44ff44',
-          stroke: '#000000',
-          strokeThickness: 2
-        }).setOrigin(0.5);
-        this.vendorUI.add(goldAmount);
-
-        // Sell All button - create OUTSIDE the container
-        const btnX = x + panelWidth / 2 - 60;
-        const btnY = y + yOffset + sellAllSectionHeight / 2;
-        const actionBtn = this.add.text(btnX, btnY, 'SELL', {
-          fontFamily: FONTS.title,
-          fontSize: '16px',
-          color: '#ffffff',
-          backgroundColor: '#cc8800',
-          padding: { x: 16, y: 10 }
-        }).setOrigin(0.5).setScrollFactor(0).setDepth(1001);
-
-        actionBtn.setInteractive({ useHandCursor: true });
-        actionBtn.on('pointerdown', () => {
-          wsClient.send({
-            type: 'PURCHASE_SERVICE',
-            vendorId: this.currentVendorId!,
-            serviceType: service.type
-          });
-        });
-        actionBtn.on('pointerover', () => actionBtn.setBackgroundColor('#eebb00'));
-        actionBtn.on('pointerout', () => actionBtn.setBackgroundColor('#cc8800'));
-        this.vendorUIButtons.push(actionBtn);
-
-        yOffset += sellAllSectionHeight + 10; // Extra spacing after sell all
-        continue;
-      }
-
-      // Create description text first to measure height
-      const descText = this.add.text(0, 0, service.description, {
-        fontFamily: FONTS.body,
-        fontSize: '14px',
-        color: '#ffffff',
-        wordWrap: { width: panelWidth - 140 },
-        stroke: '#000000',
-        strokeThickness: 1
-      });
-
-      // Calculate dynamic height based on text
-      const textHeight = descText.height;
-      const itemHeight = Math.max(75, textHeight + 50); // Min 75, or text height + padding for cost
-
-      // Regular service background
-      const bgColor = 0x333355;
-      const serviceBg = this.add.rectangle(0, yOffset + itemHeight / 2, panelWidth - 34, itemHeight - 5, bgColor, 0.9);
-      serviceBg.setStrokeStyle(1, 0x555577);
-      this.vendorUI.add(serviceBg);
-
-      // Position description text
-      descText.setPosition(-panelWidth / 2 + 28, yOffset + 12);
-      this.vendorUI.add(descText);
-
-      // Cost/value display
-      const canAfford = !isSellService && (player?.gold ?? 0) >= service.cost;
-      const costLabel = isSellService ? `Value: +${service.cost} gold` : `Cost: ${service.cost} gold`;
-      const costColor = isSellService ? '#44ff44' : (canAfford ? '#ffd700' : '#ff4444');
-      const costText = this.add.text(-panelWidth / 2 + 28, yOffset + textHeight + 20, costLabel, {
-        fontFamily: FONTS.body,
-        fontSize: '14px',
-        color: costColor,
-        stroke: '#000000',
-        strokeThickness: 1
-      });
-      this.vendorUI.add(costText);
-
-      // Action button - create OUTSIDE the container for proper input handling
-      const btnX = x + panelWidth / 2 - 55;
-      const btnY = y + yOffset + itemHeight / 2;
-      const btnLabel = isSellService ? 'Sell' : 'Buy';
-      const btnEnabled = isSellService || canAfford;
-      const btnBgColor = isSellService ? '#886622' : (canAfford ? '#228833' : '#333333');
-      const btnHoverColor = isSellService ? '#aa8833' : '#33aa44';
-
-      const actionBtn = this.add.text(btnX, btnY, btnLabel, {
-        fontFamily: FONTS.title,
-        fontSize: '16px',
-        color: btnEnabled ? '#ffffff' : '#666666',
-        backgroundColor: btnBgColor,
-        padding: { x: 14, y: 8 }
-      }).setOrigin(0.5).setScrollFactor(0).setDepth(1001);
-
-      if (btnEnabled) {
-        actionBtn.setInteractive({ useHandCursor: true });
-        actionBtn.on('pointerdown', () => {
-          console.log('[DEBUG] Action button clicked for service:', service.type, service.abilityId, service.itemId);
-          wsClient.send({
-            type: 'PURCHASE_SERVICE',
-            vendorId: this.currentVendorId!,
-            serviceType: service.type,
-            abilityId: service.abilityId,
-            itemId: service.itemId
-          });
-        });
-        actionBtn.on('pointerover', () => actionBtn.setBackgroundColor(btnHoverColor));
-        actionBtn.on('pointerout', () => actionBtn.setBackgroundColor(btnBgColor));
-      }
-      this.vendorUIButtons.push(actionBtn);
-
-      yOffset += itemHeight;
-    }
-
-    // Hint text
-    const hintText = this.add.text(0, panelHeight / 2 - 25, 'Press ESC or click X to close', {
-      fontFamily: FONTS.body,
-      fontSize: '14px',
-      color: '#666688',
-      stroke: '#000000',
-      strokeThickness: 1
-    }).setOrigin(0.5);
-    this.vendorUI.add(hintText);
-
-    // Listen for ESC to close
-    this.input.keyboard!.once('keydown-ESC', () => this.closeVendorUI());
   }
 
   private closeVendorUI(clearServices: boolean = true): void {
-    if (this.vendorUI) {
-      this.vendorUI.destroy();
-      this.vendorUI = null;
-    }
-    // Destroy buttons that were created outside the container
-    for (const btn of this.vendorUIButtons) {
-      btn.destroy();
-    }
-    this.vendorUIButtons = [];
+    // Close the React modal
+    closeVendor();
+    this.vendorModalOpen = false;
 
     if (clearServices) {
       this.currentVendorId = null;
@@ -5401,7 +5159,39 @@ export class GameScene extends Phaser.Scene {
       console.log('[DEBUG] VENDOR_SERVICES received:', message.vendorId, 'services:', message.services);
       this.currentVendorId = message.vendorId;
       this.vendorServices = message.services;
-      this.showVendorUI();
+      const player = wsClient.getCurrentPlayer();
+
+      if (this.vendorModalOpen) {
+        // Update existing modal
+        updateVendor(message.services, player?.gold ?? 0);
+      } else {
+        // Open new modal
+        this.showVendorUI();
+      }
+    } else if (message.type === 'CRYPTO_VENDOR_SERVICES') {
+      console.log('[DEBUG] CRYPTO_VENDOR_SERVICES received, purchases remaining:', message.purchasesRemaining);
+      openCryptoVendor(message.purchasesRemaining);
+    } else if (message.type === 'CRYPTO_PURCHASE_VERIFIED') {
+      console.log('[DEBUG] CRYPTO_PURCHASE_VERIFIED received:', message.potion);
+      const qualityColor = message.potion.quality === 'superior' ? 0xffaa00 :
+                          message.potion.quality === 'greater' ? 0x9966ff :
+                          message.potion.quality === 'standard' ? 0x44ff44 : 0xaaaaaa;
+      const qualityLabel = message.potion.quality.charAt(0).toUpperCase() + message.potion.quality.slice(1);
+      this.showNotification(`Received: ${qualityLabel} ${message.potion.name}!`, qualityColor);
+      updatePurchasesRemaining(message.purchasesRemaining);
+    } else if (message.type === 'CRYPTO_PURCHASE_FAILED') {
+      console.log('[DEBUG] CRYPTO_PURCHASE_FAILED:', message.reason);
+      this.showNotification(`Purchase failed: ${message.reason}`, 0xff4444);
+    } else if (message.type === 'CHEST_ETH_DROP') {
+      console.log('[DEBUG] CHEST_ETH_DROP received:', message);
+      // Update the accumulated ETH counter
+      emitWalletEvent('eth-drop-received', {
+        ethAmountWei: message.ethAmountWei,
+        totalAccumulatedWei: message.totalAccumulatedWei,
+        floor: message.floorNumber
+      });
+      // Show dramatic chest treasure announcement (distinct from boss kill)
+      this.showChestEthDropAnnouncement(message.ethAmountWei, message.floorNumber);
     } else if (message.type === 'PURCHASE_RESULT') {
       if (message.success) {
         this.showNotification(message.message);
@@ -5521,6 +5311,171 @@ export class GameScene extends Phaser.Scene {
       ease: 'Quad.easeOut',
       onComplete: () => floatText.destroy()
     });
+  }
+
+  private showChestEthDropAnnouncement(ethAmountWei: string, floor: number): void {
+    const width = this.scale.width;
+    const height = this.scale.height;
+
+    // Convert wei to readable ETH format with appropriate precision
+    const wei = BigInt(ethAmountWei);
+    const ethAmount = Number(wei) / 1e18;
+
+    // Always show in ETH, adjust decimal places based on amount
+    let decimals = 4;
+    if (ethAmount < 0.0001) decimals = 8;
+    else if (ethAmount < 0.001) decimals = 6;
+    else if (ethAmount >= 1) decimals = 4;
+
+    const displayAmount = ethAmount.toFixed(decimals).replace(/\.?0+$/, '') || '0';
+    const displayUnit = 'ETH';
+
+    // 1. Screen flash with emerald green (treasure theme)
+    const flashOverlay = this.add.rectangle(width / 2, height / 2, width + 100, height + 100, 0x4ade80, 0.3);
+    flashOverlay.setDepth(1000).setScrollFactor(0);
+
+    this.tweens.add({
+      targets: flashOverlay,
+      alpha: 0,
+      duration: 800,
+      ease: 'Quad.easeOut',
+      onComplete: () => flashOverlay.destroy()
+    });
+
+    // 2. Diamond/gem particles rising from center
+    const gemColors = [0x4ade80, 0x22c55e, 0x86efac, 0xfbbf24, 0xfcd34d];
+    const particleCount = 25;
+
+    for (let i = 0; i < particleCount; i++) {
+      const startX = width / 2 + Phaser.Math.Between(-100, 100);
+      const startY = height / 2 + 50;
+      const color = gemColors[Math.floor(Math.random() * gemColors.length)];
+
+      const gem = this.add.text(startX, startY, '◆', {
+        fontSize: `${Phaser.Math.Between(16, 28)}px`,
+        color: `#${color.toString(16).padStart(6, '0')}`
+      }).setOrigin(0.5).setDepth(1100).setScrollFactor(0).setAlpha(0.9);
+
+      this.tweens.add({
+        targets: gem,
+        y: startY - Phaser.Math.Between(100, 200),
+        x: startX + Phaser.Math.Between(-50, 50),
+        alpha: 0,
+        rotation: Phaser.Math.Between(-1, 1),
+        duration: 1200 + Phaser.Math.Between(0, 400),
+        delay: Phaser.Math.Between(0, 300),
+        ease: 'Quad.easeOut',
+        onComplete: () => gem.destroy()
+      });
+    }
+
+    // 3. Expanding emerald rings
+    for (let i = 0; i < 3; i++) {
+      this.time.delayedCall(i * 150, () => {
+        const ring = this.add.circle(width / 2, height / 2, 30, undefined, undefined);
+        ring.setStrokeStyle(3 - i, 0x4ade80, 0.8);
+        ring.setDepth(1050).setScrollFactor(0);
+
+        this.tweens.add({
+          targets: ring,
+          radius: 150 + i * 40,
+          alpha: 0,
+          duration: 700,
+          ease: 'Quad.easeOut',
+          onComplete: () => ring.destroy()
+        });
+      });
+    }
+
+    // 4. Main announcement text - "TREASURE FOUND!"
+    const titleText = this.add.text(width / 2, height / 2 - 60, 'TREASURE FOUND!', {
+      fontFamily: 'Cinzel, serif',
+      fontSize: '32px',
+      color: '#4ade80',
+      stroke: '#000000',
+      strokeThickness: 4,
+      shadow: { blur: 15, color: '#22c55e', fill: true }
+    }).setOrigin(0.5).setDepth(1200).setScrollFactor(0).setAlpha(0).setScale(0.3);
+
+    // 5. ETH amount display
+    const ethText = this.add.text(width / 2, height / 2, `◆ ${displayAmount} ${displayUnit}`, {
+      fontFamily: 'Cinzel, serif',
+      fontSize: '28px',
+      color: '#fbbf24',
+      stroke: '#000000',
+      strokeThickness: 3,
+      shadow: { blur: 10, color: '#f59e0b', fill: true }
+    }).setOrigin(0.5).setDepth(1200).setScrollFactor(0).setAlpha(0).setScale(0.3);
+
+    // 6. Floor indicator
+    const floorText = this.add.text(width / 2, height / 2 + 45, `Floor ${floor} Boss Chest`, {
+      fontFamily: 'Crimson Text, serif',
+      fontSize: '18px',
+      color: '#a0a0a0',
+      stroke: '#000000',
+      strokeThickness: 2
+    }).setOrigin(0.5).setDepth(1200).setScrollFactor(0).setAlpha(0);
+
+    // Animate texts in sequence
+    this.time.delayedCall(100, () => {
+      // Title swoops in
+      this.tweens.add({
+        targets: titleText,
+        alpha: 1,
+        scale: 1,
+        duration: 400,
+        ease: 'Back.easeOut'
+      });
+
+      // ETH amount with slight delay
+      this.tweens.add({
+        targets: ethText,
+        alpha: 1,
+        scale: 1,
+        duration: 400,
+        delay: 200,
+        ease: 'Back.easeOut'
+      });
+
+      // Floor text fades in
+      this.tweens.add({
+        targets: floorText,
+        alpha: 0.8,
+        duration: 300,
+        delay: 350,
+        ease: 'Quad.easeOut',
+        onComplete: () => {
+          // Shimmer effect on ETH amount
+          this.tweens.add({
+            targets: ethText,
+            scale: 1.05,
+            duration: 200,
+            yoyo: true,
+            repeat: 2,
+            ease: 'Sine.easeInOut'
+          });
+
+          // Fade out after display
+          this.time.delayedCall(2000, () => {
+            this.tweens.add({
+              targets: [titleText, ethText, floorText],
+              alpha: 0,
+              y: '-=40',
+              duration: 600,
+              ease: 'Cubic.easeIn',
+              onComplete: () => {
+                titleText.destroy();
+                ethText.destroy();
+                floorText.destroy();
+              }
+            });
+          });
+        }
+      });
+    });
+
+    // Play a coin/treasure sound
+    this.playSfx('sfxLoot', 0.5);
   }
 
   private playDeathAnimation(x: number, y: number, sprite?: Phaser.GameObjects.Sprite): void {
@@ -6796,7 +6751,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Skip if vendor UI is open
-    if (this.vendorUI) {
+    if (this.vendorModalOpen) {
       return;
     }
 
