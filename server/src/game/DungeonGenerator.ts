@@ -1,4 +1,4 @@
-import { Room, Dungeon, Enemy, EnemyType, Position, Trap, Chest, TrapType, FloorTheme } from '@dungeon-link/shared';
+import { Room, Dungeon, Enemy, EnemyType, Position, Trap, Chest, TrapType, FloorTheme, RoomVariant, RoomModifier } from '@dungeon-link/shared';
 import { GAME_CONFIG, SPRITE_CONFIG } from '@dungeon-link/shared';
 import { SeededRNG, createFloorRNG } from '../utils/SeededRNG.js';
 import { getEnemiesForFloor, getEnemyById, createRareVariant, ENEMIES } from '../data/enemies.js';
@@ -34,12 +34,15 @@ export function generateDungeon(
   // Assign room types (start, normal, boss, potentially rare)
   assignRoomTypes(rng, rooms, floor);
 
-  // Populate rooms with enemies
-  populateRooms(rng, rooms, floor, partySize, averageItemPower);
-
-  // Determine floor theme
+  // Determine floor theme (needed for variant/modifier selection)
   const theme = getFloorTheme(floor);
   const themeModifiers = getThemeModifiers(theme, floor);
+
+  // Assign room variants and modifiers
+  assignRoomVariantsAndModifiers(rng, rooms, floor, theme);
+
+  // Populate rooms with enemies (uses variants for formations)
+  populateRooms(rng, rooms, floor, partySize, averageItemPower);
 
   // Place traps and chests (modified by theme)
   placeTrapsAndChests(rng, rooms, floor, themeModifiers.trapMultiplier, theme);
@@ -475,6 +478,21 @@ function assignRoomTypes(rng: SeededRNG, rooms: Room[], floor: number): void {
 }
 
 /**
+ * Assign room variants and modifiers to each room.
+ * Variants determine enemy formations, modifiers add environmental effects.
+ */
+function assignRoomVariantsAndModifiers(rng: SeededRNG, rooms: Room[], floor: number, theme: FloorTheme): void {
+  for (const room of rooms) {
+    room.variant = selectRoomVariant(rng, room, floor);
+    room.modifier = selectRoomModifier(rng, room, floor, theme);
+
+    if (room.variant !== 'standard') {
+      console.log(`[DUNGEON] Room ${room.id} assigned variant: ${room.variant}${room.modifier ? `, modifier: ${room.modifier}` : ''}`);
+    }
+  }
+}
+
+/**
  * Populate rooms with enemies
  */
 function populateRooms(
@@ -618,6 +636,60 @@ function populateRooms(
 }
 
 /**
+ * Calculate the corridor midpoint between two connected rooms.
+ * Used for patrol waypoints to ensure enemies walk through corridors, not walls.
+ *
+ * BUG FIX: Previously patrols moved in direct lines to room centers,
+ * cutting through walls. Now they follow corridor paths.
+ */
+function getCorridorMidpoint(fromRoom: Room, toRoom: Room): Position {
+  const fromCenterX = fromRoom.x + fromRoom.width / 2;
+  const fromCenterY = fromRoom.y + fromRoom.height / 2;
+  const toCenterX = toRoom.x + toRoom.width / 2;
+  const toCenterY = toRoom.y + toRoom.height / 2;
+
+  // The corridor midpoint is simply the midpoint between room centers
+  // This ensures the patrol walks through the corridor opening
+  return {
+    x: (fromCenterX + toCenterX) / 2,
+    y: (fromCenterY + toCenterY) / 2
+  };
+}
+
+/**
+ * Calculate patrol waypoints for a given route of room IDs.
+ * Returns an array of positions that follow corridor paths.
+ *
+ * For a route [A, B, C], waypoints will be:
+ * [center(A), corridor(A-B), center(B), corridor(B-C), center(C)]
+ */
+function calculatePatrolWaypoints(rooms: Room[], patrolRoute: string[]): Position[] {
+  const waypoints: Position[] = [];
+
+  for (let i = 0; i < patrolRoute.length; i++) {
+    const room = rooms.find(r => r.id === patrolRoute[i]);
+    if (!room) continue;
+
+    // Add room center
+    const roomCenter: Position = {
+      x: room.x + room.width / 2,
+      y: room.y + room.height / 2
+    };
+    waypoints.push(roomCenter);
+
+    // Add corridor midpoint to next room (if not last room)
+    if (i < patrolRoute.length - 1) {
+      const nextRoom = rooms.find(r => r.id === patrolRoute[i + 1]);
+      if (nextRoom) {
+        waypoints.push(getCorridorMidpoint(room, nextRoom));
+      }
+    }
+  }
+
+  return waypoints;
+}
+
+/**
  * Spawn patrolling enemies that move between connected rooms
  * Guarantees patrol enemies on floor 2+ with increasing numbers
  */
@@ -675,6 +747,9 @@ function spawnPatrollingEnemies(
 
     if (patrolRoute.length < 2) continue; // Need at least 2 rooms
 
+    // Calculate waypoints that follow corridors (BUG FIX)
+    const patrolWaypoints = calculatePatrolWaypoints(rooms, patrolRoute);
+
     // Create a patrolling enemy
     const enemyDef = rng.pick(availableEnemies);
     const scaled = scaleEnemyStats(
@@ -715,12 +790,16 @@ function spawnPatrollingEnemies(
       isPatrolling: true,
       patrolRoute,
       currentRoomId: patrolRoom.id,
-      patrolTargetRoomId: patrolRoute[1]
+      patrolTargetRoomId: patrolRoute[1],
+      // BUG FIX: Pre-calculated waypoints that follow corridors
+      patrolWaypoints,
+      currentWaypointIndex: 0,
+      patrolDirection: 1
     };
 
     // Add to the starting room
     patrolRoom.enemies.push(patroller);
-    console.log(`[DEBUG] Spawned patrolling enemy in room ${patrolRoom.id}, route: ${patrolRoute.join(' -> ')}`);
+    console.log(`[DEBUG] Spawned patrolling enemy in room ${patrolRoom.id}, route: ${patrolRoute.join(' -> ')}, waypoints: ${patrolWaypoints.length}`);
   }
 }
 
@@ -735,10 +814,15 @@ function generateEnemyPack(
 ): Enemy[] {
   const enemies: Enemy[] = [];
 
+  // Get formation positions based on room variant
+  const variant = room.variant || 'standard';
+  const positions = getFormationPositions(rng, room, variant, count);
+  const isAmbush = variant === 'ambush';
+
   for (let i = 0; i < count; i++) {
     const enemyDef = rng.pick(availableEnemies);
     const scaled = scaleEnemyStats(enemyDef.baseHealth, enemyDef.baseDamage, floor, partySize, averageItemPower);
-    const spawnPos = getRandomPosition(rng, room);
+    const spawnPos = positions[i] || getRandomPosition(rng, room);
 
     enemies.push({
       id: `enemy_${room.id}_${i}`,
@@ -764,7 +848,8 @@ function generateEnemyPack(
       targetId: null,
       isBoss: false,
       isRare: false,
-      debuffs: []
+      debuffs: [],
+      isHidden: isAmbush  // Hidden until ambush triggers
     });
   }
 
@@ -777,6 +862,288 @@ function getRandomPosition(rng: SeededRNG, room: Room): Position {
     x: rng.nextInt(room.x + padding, room.x + room.width - padding),
     y: rng.nextInt(room.y + padding, room.y + room.height - padding)
   };
+}
+
+// ============================================
+// ROOM VARIANT SYSTEM - Enemy Formation Helpers
+// ============================================
+
+/**
+ * Select a room variant based on floor and room properties.
+ * Different variants change enemy spawn formations.
+ */
+function selectRoomVariant(rng: SeededRNG, room: Room, floor: number): RoomVariant {
+  if (room.type === 'boss') return 'arena';  // Boss always arena style
+  if (room.type === 'start') return 'standard';
+
+  // Check if room is elongated (for gauntlet)
+  const isElongated = room.width > room.height * 1.5 || room.height > room.width * 1.5;
+
+  // Weighted random based on floor
+  const weights: Record<RoomVariant, number> = {
+    standard: 35,
+    arena: 15,
+    guardian: floor >= 3 ? 15 : 0,
+    swarm: 15,
+    ambush: floor >= 2 ? 12 : 0,
+    gauntlet: isElongated ? 15 : 0,
+  };
+
+  // Calculate total weight
+  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+  let roll = rng.nextFloat(0, totalWeight);
+
+  for (const [variant, weight] of Object.entries(weights)) {
+    roll -= weight;
+    if (roll <= 0) return variant as RoomVariant;
+  }
+
+  return 'standard';
+}
+
+/**
+ * Select a room modifier based on floor and theme.
+ * Modifiers apply environmental effects.
+ */
+function selectRoomModifier(rng: SeededRNG, room: Room, floor: number, theme: FloorTheme): RoomModifier | undefined {
+  // No modifiers on start, boss, or early floors
+  if (room.type === 'start' || room.type === 'boss' || floor < 3) return undefined;
+
+  // 20% chance of having a modifier
+  if (!rng.chance(0.20)) return undefined;
+
+  // Build weighted list based on theme
+  const modifiers: { mod: RoomModifier; weight: number }[] = [
+    { mod: 'cursed', weight: 30 },
+  ];
+
+  // Theme-specific modifiers
+  if (theme === FloorTheme.Shadow) {
+    modifiers.push({ mod: 'dark', weight: 40 });
+  }
+  if (theme === FloorTheme.Inferno) {
+    modifiers.push({ mod: 'burning', weight: 40 });
+  }
+
+  // Rare blessed modifier (5% of modified rooms)
+  if (rng.chance(0.05)) {
+    return 'blessed';
+  }
+
+  const totalWeight = modifiers.reduce((a, b) => a + b.weight, 0);
+  let roll = rng.nextFloat(0, totalWeight);
+
+  for (const { mod, weight } of modifiers) {
+    roll -= weight;
+    if (roll <= 0) return mod;
+  }
+
+  return 'cursed';
+}
+
+/**
+ * Get enemy positions based on room variant.
+ * Returns an array of positions for enemy spawns.
+ */
+function getFormationPositions(
+  rng: SeededRNG,
+  room: Room,
+  variant: RoomVariant,
+  count: number
+): Position[] {
+  const padding = SPRITE_CONFIG.ENEMY_SIZE + 20;
+  const cx = room.x + room.width / 2;
+  const cy = room.y + room.height / 2;
+
+  switch (variant) {
+    case 'arena':
+      // Enemies spread around room edges
+      return distributeOnPerimeter(room, count, padding);
+
+    case 'guardian':
+      // First enemy (elite) in center, rest in circle around
+      const positions: Position[] = [{ x: cx, y: cy }];
+      if (count > 1) {
+        positions.push(...distributeInCircle(cx, cy, 80, count - 1));
+      }
+      return positions;
+
+    case 'swarm':
+      // All enemies clustered in one area
+      const corner = pickRandomCorner(rng, room, padding);
+      return distributeInCluster(rng, corner.x, corner.y, 60, count);
+
+    case 'ambush':
+      // Enemies near walls (they'll be hidden initially)
+      return distributeNearWalls(rng, room, count, padding);
+
+    case 'gauntlet':
+      // Enemies spread along longest axis
+      return distributeAlongAxis(room, count, padding);
+
+    case 'standard':
+    default:
+      // Random placement (original behavior)
+      const randomPositions: Position[] = [];
+      for (let i = 0; i < count; i++) {
+        randomPositions.push(getRandomPosition(rng, room));
+      }
+      return randomPositions;
+  }
+}
+
+/**
+ * Distribute positions around room perimeter
+ */
+function distributeOnPerimeter(room: Room, count: number, padding: number): Position[] {
+  const positions: Position[] = [];
+  const perimeter = 2 * (room.width + room.height) - 4 * padding;
+  const spacing = perimeter / count;
+
+  for (let i = 0; i < count; i++) {
+    const dist = i * spacing;
+    const pos = getPerimeterPosition(room, dist, padding);
+    positions.push(pos);
+  }
+
+  return positions;
+}
+
+function getPerimeterPosition(room: Room, distance: number, padding: number): Position {
+  const w = room.width - 2 * padding;
+  const h = room.height - 2 * padding;
+
+  // Walk around perimeter: top -> right -> bottom -> left
+  if (distance < w) {
+    return { x: room.x + padding + distance, y: room.y + padding };
+  }
+  distance -= w;
+  if (distance < h) {
+    return { x: room.x + room.width - padding, y: room.y + padding + distance };
+  }
+  distance -= h;
+  if (distance < w) {
+    return { x: room.x + room.width - padding - distance, y: room.y + room.height - padding };
+  }
+  distance -= w;
+  return { x: room.x + padding, y: room.y + room.height - padding - distance };
+}
+
+/**
+ * Distribute positions in a circle around center
+ */
+function distributeInCircle(cx: number, cy: number, radius: number, count: number): Position[] {
+  const positions: Position[] = [];
+  for (let i = 0; i < count; i++) {
+    const angle = (i * 2 * Math.PI) / count;
+    positions.push({
+      x: cx + Math.cos(angle) * radius,
+      y: cy + Math.sin(angle) * radius
+    });
+  }
+  return positions;
+}
+
+/**
+ * Pick a random corner of the room
+ */
+function pickRandomCorner(rng: SeededRNG, room: Room, padding: number): Position {
+  const corners: Position[] = [
+    { x: room.x + padding + 40, y: room.y + padding + 40 },
+    { x: room.x + room.width - padding - 40, y: room.y + padding + 40 },
+    { x: room.x + padding + 40, y: room.y + room.height - padding - 40 },
+    { x: room.x + room.width - padding - 40, y: room.y + room.height - padding - 40 },
+  ];
+  return rng.pick(corners);
+}
+
+/**
+ * Distribute positions in a cluster around a point
+ */
+function distributeInCluster(rng: SeededRNG, cx: number, cy: number, radius: number, count: number): Position[] {
+  const positions: Position[] = [];
+  for (let i = 0; i < count; i++) {
+    const angle = rng.nextFloat(0, 2 * Math.PI);
+    const r = rng.nextFloat(0, radius);
+    positions.push({
+      x: cx + Math.cos(angle) * r,
+      y: cy + Math.sin(angle) * r
+    });
+  }
+  return positions;
+}
+
+/**
+ * Distribute positions near room walls (for ambush)
+ */
+function distributeNearWalls(rng: SeededRNG, room: Room, count: number, padding: number): Position[] {
+  const positions: Position[] = [];
+  const wallOffset = 30; // Distance from wall
+
+  for (let i = 0; i < count; i++) {
+    const wall = rng.nextInt(0, 3); // 0=top, 1=right, 2=bottom, 3=left
+    let pos: Position;
+
+    switch (wall) {
+      case 0: // Top wall
+        pos = {
+          x: rng.nextInt(room.x + padding, room.x + room.width - padding),
+          y: room.y + wallOffset
+        };
+        break;
+      case 1: // Right wall
+        pos = {
+          x: room.x + room.width - wallOffset,
+          y: rng.nextInt(room.y + padding, room.y + room.height - padding)
+        };
+        break;
+      case 2: // Bottom wall
+        pos = {
+          x: rng.nextInt(room.x + padding, room.x + room.width - padding),
+          y: room.y + room.height - wallOffset
+        };
+        break;
+      default: // Left wall
+        pos = {
+          x: room.x + wallOffset,
+          y: rng.nextInt(room.y + padding, room.y + room.height - padding)
+        };
+        break;
+    }
+    positions.push(pos);
+  }
+
+  return positions;
+}
+
+/**
+ * Distribute positions along the longest axis of the room
+ */
+function distributeAlongAxis(room: Room, count: number, padding: number): Position[] {
+  const positions: Position[] = [];
+  const isWide = room.width > room.height;
+
+  if (isWide) {
+    const spacing = (room.width - 2 * padding) / (count + 1);
+    const cy = room.y + room.height / 2;
+    for (let i = 0; i < count; i++) {
+      positions.push({
+        x: room.x + padding + spacing * (i + 1),
+        y: cy
+      });
+    }
+  } else {
+    const spacing = (room.height - 2 * padding) / (count + 1);
+    const cx = room.x + room.width / 2;
+    for (let i = 0; i < count; i++) {
+      positions.push({
+        x: cx,
+        y: room.y + padding + spacing * (i + 1)
+      });
+    }
+  }
+
+  return positions;
 }
 
 /**

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { Player, Enemy, Room, ServerMessage, EnemyType, Potion, PotionType, Pet, GroundEffect, GroundEffectType, AbilityType, VendorService, Vendor, GroundItem, Trap, Chest, TrapType, FloorTheme, FloorThemeModifiers } from '@dungeon-link/shared';
 import { CLASS_COLORS, SPRITE_CONFIG, ENEMY_TYPE_COLORS, getAbilityById, calculateAbilityDamage, calculateAbilityHeal } from '@dungeon-link/shared';
-import { openCryptoVendor, updatePurchasesRemaining, emitWalletEvent, openVendor, closeVendor, updateVendor, onWalletEvent } from '../wallet';
+import { openCryptoVendor, updatePurchasesRemaining, emitWalletEvent, openVendor, closeVendor, updateVendor, onWalletEvent, initWalletUI } from '../wallet/lazyWallet';
 import { wsClient } from '../network/WebSocketClient';
 import { InputManager } from '../systems/InputManager';
 import { AbilitySystem } from '../systems/AbilitySystem';
@@ -25,6 +25,7 @@ export class GameScene extends Phaser.Scene {
   private roomTiles: Map<string, Phaser.GameObjects.TileSprite> = new Map();
   private roomDecorations: Map<string, Phaser.GameObjects.Sprite[]> = new Map();
   private roomWalls: Map<string, Phaser.GameObjects.TileSprite[]> = new Map();
+  private roomModifierOverlays: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private corridorElements: Map<string, Phaser.GameObjects.GameObject[]> = new Map();
   private healthBars: Map<string, { bg: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle }> = new Map();
 
@@ -39,9 +40,14 @@ export class GameScene extends Phaser.Scene {
   private actionXpBarBg: Phaser.GameObjects.Rectangle | null = null;
   private actionXpBarFill: Phaser.GameObjects.Rectangle | null = null;
   private actionXpText: Phaser.GameObjects.Text | null = null;
-  private inviteButton: Phaser.GameObjects.Text | null = null;
+  // NOTE: inviteButton removed - game is now single-player only
   private advanceButton: Phaser.GameObjects.Text | null = null;
   private minimapGraphics: Phaser.GameObjects.Graphics | null = null;
+
+  // Navigator Panel (unified minimap + controls)
+  private navigatorPanel: Phaser.GameObjects.Container | null = null;
+  private navigatorFloorText: Phaser.GameObjects.Text | null = null;
+  private navigatorRoomText: Phaser.GameObjects.Text | null = null;
 
   // Combat text
   private damageTexts: Phaser.GameObjects.Text[] = [];
@@ -76,6 +82,7 @@ export class GameScene extends Phaser.Scene {
   private buffTexts: Phaser.GameObjects.Text[] = [];
   private buffTooltip: Phaser.GameObjects.Container | null = null;
   private currentBuffsCache: any[] = []; // Store current buffs for tooltip access
+  private hoveredBuffSlot: number = -1; // Track which buff slot is being hovered (-1 = none)
 
   // Projectiles
   private projectiles: Phaser.GameObjects.Container[] = [];
@@ -91,6 +98,12 @@ export class GameScene extends Phaser.Scene {
 
   // Track enemies that have already shown spawn notification (rare/elite)
   private notifiedEnemyIds: Set<string> = new Set();
+
+  // Track ambush enemies that have been revealed (for animation/sound)
+  private revealedAmbushEnemyIds: Set<string> = new Set();
+
+  // Track enemies that are currently hidden (to detect when they become visible)
+  private hiddenEnemyIds: Set<string> = new Set();
 
   // Potion quick slots
   private healthPotionSlot: Phaser.GameObjects.Container | null = null;
@@ -169,6 +182,9 @@ export class GameScene extends Phaser.Scene {
       console.log('[DEBUG] GameScene create() starting');
       console.log('[DEBUG] wsClient.currentState:', wsClient.currentState ? 'exists' : 'null');
 
+      // Initialize wallet UI (lazy-loaded, won't block)
+      initWalletUI().catch(err => console.error('[Wallet] Failed to init:', err));
+
       // CRITICAL: Destroy ALL existing children first to prevent visual artifacts
       // This ensures no orphaned sprites/graphics from previous sessions persist
       console.log('[DEBUG] Destroying all children. Count:', this.children.length);
@@ -226,6 +242,8 @@ export class GameScene extends Phaser.Scene {
       this.roomDecorations.clear();
       this.roomWalls.forEach(walls => walls?.forEach(w => safeDestroy(w)));
       this.roomWalls.clear();
+      this.roomModifierOverlays.forEach(overlay => safeDestroy(overlay));
+      this.roomModifierOverlays.clear();
       this.corridorElements.forEach(elements => elements?.forEach(e => safeDestroy(e)));
       this.corridorElements.clear();
       this.groundEffectGraphics.forEach(g => safeDestroy(g));
@@ -252,6 +270,8 @@ export class GameScene extends Phaser.Scene {
       this.activeNotifications = [];
       this.knownPetIds.clear();
       this.notifiedEnemyIds.clear();
+      this.revealedAmbushEnemyIds.clear();
+      this.hiddenEnemyIds.clear();
       this.vendorServices = [];
       this.currentVendorId = null;
       this.vendorModalOpen = false;
@@ -270,8 +290,11 @@ export class GameScene extends Phaser.Scene {
       this.buffTexts = [];
 
       // Clean up UI elements that are recreated in createUI()
-      safeDestroy(this.minimapGraphics);
-      this.minimapGraphics = null;
+      safeDestroy(this.navigatorPanel);
+      this.navigatorPanel = null;
+      this.minimapGraphics = null; // Graphics is destroyed with the container
+      this.navigatorFloorText = null;
+      this.navigatorRoomText = null;
       safeDestroy(this.buffsContainer);
       this.buffsContainer = null;
       safeDestroy(this.buffTooltip);
@@ -323,8 +346,7 @@ export class GameScene extends Phaser.Scene {
       this.livesText = null;
       safeDestroy(this.advanceButton);
       this.advanceButton = null;
-      safeDestroy(this.inviteButton);
-      this.inviteButton = null;
+      // NOTE: inviteButton removed - game is now single-player only
 
       // Clean up any existing ability tooltips
       const existingTooltip = this.children.getByName('ability_tooltip');
@@ -423,50 +445,8 @@ export class GameScene extends Phaser.Scene {
     this.floorText = this.add.text(-100, -100, '', {}).setVisible(false);
     this.levelText = this.add.text(-100, -100, '', {}).setVisible(false);
 
-    // Buttons positioned to the left of minimap (minimap is at width-130, y=50)
-    const buttonX = width - 230;
-
-    // Invite button
-    this.inviteButton = this.add.text(buttonX, 50, 'Copy Invite', {
-      fontFamily: FONTS.title,
-      fontSize: '11px',
-      color: '#e0e0e0',
-      backgroundColor: '#3a3a5a',
-      padding: { x: 10, y: 5 }
-    }).setScrollFactor(0).setDepth(100);
-
-    this.inviteButton.setInteractive({ useHandCursor: true });
-    this.inviteButton.on('pointerdown', () => this.copyInviteLink());
-    this.inviteButton.on('pointerover', () => this.inviteButton?.setBackgroundColor('#4a4a6a'));
-    this.inviteButton.on('pointerout', () => this.inviteButton?.setBackgroundColor('#3a3a5a'));
-
-    // Save button
-    const saveButton = this.add.text(buttonX, 80, 'Save', {
-      fontFamily: FONTS.title,
-      fontSize: '11px',
-      color: '#e0e0e0',
-      backgroundColor: '#3a5a3a',
-      padding: { x: 10, y: 5 }
-    }).setScrollFactor(0).setDepth(100);
-
-    saveButton.setInteractive({ useHandCursor: true });
-    saveButton.on('pointerdown', () => this.saveGame());
-    saveButton.on('pointerover', () => saveButton.setBackgroundColor('#4a6a4a'));
-    saveButton.on('pointerout', () => saveButton.setBackgroundColor('#3a5a3a'));
-
-    // Leave game button
-    const leaveButton = this.add.text(buttonX, 110, 'Leave', {
-      fontFamily: FONTS.title,
-      fontSize: '11px',
-      color: '#e0e0e0',
-      backgroundColor: '#5a3a3a',
-      padding: { x: 10, y: 5 }
-    }).setScrollFactor(0).setDepth(100);
-
-    leaveButton.setInteractive({ useHandCursor: true });
-    leaveButton.on('pointerdown', () => this.leaveGame());
-    leaveButton.on('pointerover', () => leaveButton.setBackgroundColor('#6a4a4a'));
-    leaveButton.on('pointerout', () => leaveButton.setBackgroundColor('#5a3a3a'));
+    // Create unified Navigator Panel (minimap + controls)
+    this.createNavigatorPanel();
 
     // Advance floor button (hidden initially) - positioned above ability bar
     this.advanceButton = this.add.text(width / 2, height - 100, 'Press SPACE to continue', {
@@ -476,10 +456,6 @@ export class GameScene extends Phaser.Scene {
       backgroundColor: '#c9a227',
       padding: { x: 25, y: 12 }
     }).setOrigin(0.5).setScrollFactor(0).setDepth(150).setVisible(false);
-
-    // Minimap background
-    this.minimapGraphics = this.add.graphics();
-    this.minimapGraphics.setScrollFactor(0).setDepth(100);
 
     // Target info panel (top left, below floor text)
     this.createTargetInfoPanel();
@@ -495,11 +471,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createBuffsUI(): void {
-    // Position buffs to the right of player frame
-    const x = 240; // Right of player frame (220px wide + gap)
-    const y = 15;
+    // Position buffs under the player frame
+    const baseX = 10; // Aligned with player frame
+    const baseY = 110; // Below player frame (10 + 95 + 5 gap)
 
-    this.buffsContainer = this.add.container(x, y).setScrollFactor(0).setDepth(100);
+    // Create a simple container just for grouping (won't affect input)
+    this.buffsContainer = this.add.container(0, 0).setScrollFactor(0).setDepth(160);
 
     // Create buff tooltip (hidden by default)
     this.buffTooltip = this.add.container(0, 0).setDepth(600).setScrollFactor(0).setVisible(false).setName('buff_tooltip');
@@ -531,37 +508,40 @@ export class GameScene extends Phaser.Scene {
     const gap = 3;
 
     for (let i = 0; i < 8; i++) {
-      const iconX = i * (iconSize + gap);
+      const iconX = baseX + i * (iconSize + gap) + iconSize / 2;
+      const iconY = baseY + iconSize / 2;
 
-      // Use image for buff icon (will set texture dynamically)
-      const icon = this.add.image(iconX + iconSize / 2, iconSize / 2, 'buff_generic');
+      // Use image for buff icon - position directly on scene (not in container)
+      const icon = this.add.image(iconX, iconY, 'buff_generic');
       icon.setDisplaySize(iconSize, iconSize);
+      icon.setScrollFactor(0);
+      icon.setDepth(160);
       icon.setVisible(false);
       icon.setInteractive({ useHandCursor: true });
 
       // Add hover events for buff tooltip
       const slotIndex = i;
       icon.on('pointerover', () => {
+        this.hoveredBuffSlot = slotIndex; // Track which slot is hovered
         if (slotIndex < this.currentBuffsCache.length) {
           const buff = this.currentBuffsCache[slotIndex];
-          this.showBuffTooltip(buff, x + iconX + iconSize / 2, y + iconSize + 30);
+          this.showBuffTooltip(buff, iconX, baseY + iconSize + 35);
         }
       });
       icon.on('pointerout', () => {
+        this.hoveredBuffSlot = -1; // Clear hovered slot
         this.buffTooltip?.setVisible(false);
       });
 
-      this.buffsContainer.add(icon);
       this.buffIcons.push(icon);
 
-      // Duration text (below the icon)
-      const text = this.add.text(iconX + iconSize / 2, iconSize + 2, '', {
+      // Duration text (below the icon) - also directly on scene
+      const text = this.add.text(iconX, baseY + iconSize + 2, '', {
         fontSize: '9px',
         color: '#ffffff',
         stroke: '#000000',
         strokeThickness: 1
-      }).setOrigin(0.5, 0);
-      this.buffsContainer.add(text);
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(160);
       this.buffTexts.push(text);
     }
   }
@@ -620,7 +600,40 @@ export class GameScene extends Phaser.Scene {
     title.setY(-totalHeight + padding);
     desc.setY(-totalHeight + padding + titleHeight + 6);
 
-    this.buffTooltip.setPosition(x, y);
+    // Adjust position to keep tooltip on screen
+    // Tooltip has origin (0.5, 1) - centered horizontally, anchored at bottom
+    const screenWidth = this.cameras.main.width;
+    const screenHeight = this.cameras.main.height;
+    const margin = 5;
+
+    let finalX = x;
+    let finalY = y;
+
+    // Check horizontal bounds (tooltip extends tooltipWidth/2 in each direction from x)
+    const leftEdge = finalX - tooltipWidth / 2;
+    const rightEdge = finalX + tooltipWidth / 2;
+
+    if (leftEdge < margin) {
+      // Would go off left edge - shift right
+      finalX = margin + tooltipWidth / 2;
+    } else if (rightEdge > screenWidth - margin) {
+      // Would go off right edge - shift left
+      finalX = screenWidth - margin - tooltipWidth / 2;
+    }
+
+    // Check vertical bounds (tooltip extends upward from y by totalHeight)
+    const topEdge = finalY - totalHeight;
+
+    if (topEdge < margin) {
+      // Would go off top - position below the trigger point instead
+      finalY = y + totalHeight + 30; // Flip to below
+    }
+    if (finalY > screenHeight - margin) {
+      // Would go off bottom
+      finalY = screenHeight - margin;
+    }
+
+    this.buffTooltip.setPosition(finalX, finalY);
     this.buffTooltip.setVisible(true);
   }
 
@@ -874,22 +887,177 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Creates the unified Navigator Panel - a cohesive HUD element containing:
+   * - Minimap with styled frame (right side)
+   * - Floor/room progress info
+   * - Save and Leave text buttons (left side, stacked vertically)
+   *
+   * Buttons are added OUTSIDE the container to ensure clickability
+   * (graphics redraw in container can interfere with hit areas)
+   */
+  private createNavigatorPanel(): void {
+    const screenWidth = this.cameras.main.width;
+
+    // Panel dimensions - horizontal layout
+    const panelWidth = 200;
+    const panelHeight = 110;
+    const panelX = screenWidth - panelWidth - 10;
+    const panelY = 10;
+
+    // Create main container (for panel background and map only)
+    this.navigatorPanel = this.add.container(panelX, panelY).setScrollFactor(0).setDepth(100);
+
+    // Panel background
+    const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, COLORS.panelBg, 0.92).setOrigin(0, 0);
+    bg.setStrokeStyle(2, COLORS.border);
+    this.navigatorPanel.add(bg);
+
+    // Gold corner decorations
+    const corners = this.add.graphics();
+    corners.lineStyle(2, COLORS.borderGold);
+    const cornerSize = 10;
+    // Top-left
+    corners.beginPath();
+    corners.moveTo(0, cornerSize);
+    corners.lineTo(0, 0);
+    corners.lineTo(cornerSize, 0);
+    corners.strokePath();
+    // Top-right
+    corners.beginPath();
+    corners.moveTo(panelWidth - cornerSize, 0);
+    corners.lineTo(panelWidth, 0);
+    corners.lineTo(panelWidth, cornerSize);
+    corners.strokePath();
+    // Bottom-left
+    corners.beginPath();
+    corners.moveTo(0, panelHeight - cornerSize);
+    corners.lineTo(0, panelHeight);
+    corners.lineTo(cornerSize, panelHeight);
+    corners.strokePath();
+    // Bottom-right
+    corners.beginPath();
+    corners.moveTo(panelWidth - cornerSize, panelHeight);
+    corners.lineTo(panelWidth, panelHeight);
+    corners.lineTo(panelWidth, panelHeight - cornerSize);
+    corners.strokePath();
+    this.navigatorPanel.add(corners);
+
+    // === LEFT SIDE: Buttons and info ===
+    const leftPadding = 10;
+    const buttonWidth = 55;
+    const buttonHeight = 26;
+    const buttonGap = 6;
+
+    // Floor info text (top left)
+    this.navigatorFloorText = this.add.text(leftPadding, 10, 'Floor 1', {
+      fontFamily: FONTS.title,
+      fontSize: '13px',
+      color: COLORS_HEX.goldLight
+    }).setOrigin(0, 0);
+    this.navigatorPanel.add(this.navigatorFloorText);
+
+    this.navigatorRoomText = this.add.text(leftPadding, 26, '0/0 cleared', {
+      fontFamily: FONTS.body,
+      fontSize: '10px',
+      color: COLORS_HEX.textMuted
+    }).setOrigin(0, 0);
+    this.navigatorPanel.add(this.navigatorRoomText);
+
+    // === BUTTONS - Added directly to scene (not container) for reliable clicks ===
+    const buttonsX = panelX + leftPadding;
+    const buttonsY = panelY + 48;
+
+    // Save button
+    const saveBg = this.add.rectangle(buttonsX + buttonWidth / 2, buttonsY + buttonHeight / 2, buttonWidth, buttonHeight, COLORS.panelBgLight, 1)
+      .setStrokeStyle(1, COLORS.border)
+      .setScrollFactor(0)
+      .setDepth(101);
+    saveBg.setInteractive({ useHandCursor: true });
+
+    const saveText = this.add.text(buttonsX + buttonWidth / 2, buttonsY + buttonHeight / 2, 'Save', {
+      fontFamily: FONTS.title,
+      fontSize: '11px',
+      color: COLORS_HEX.textSecondary
+    }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(101);
+
+    saveBg.on('pointerover', () => {
+      saveBg.setFillStyle(0x3a5a3a, 1);
+      saveBg.setStrokeStyle(1, 0x4a7a4a);
+      saveText.setColor('#ffffff');
+    });
+    saveBg.on('pointerout', () => {
+      saveBg.setFillStyle(COLORS.panelBgLight, 1);
+      saveBg.setStrokeStyle(1, COLORS.border);
+      saveText.setColor(COLORS_HEX.textSecondary);
+    });
+    saveBg.on('pointerdown', () => this.saveGame());
+
+    // Leave button
+    const leaveY = buttonsY + buttonHeight + buttonGap;
+    const leaveBg = this.add.rectangle(buttonsX + buttonWidth / 2, leaveY + buttonHeight / 2, buttonWidth, buttonHeight, COLORS.panelBgLight, 1)
+      .setStrokeStyle(1, COLORS.border)
+      .setScrollFactor(0)
+      .setDepth(101);
+    leaveBg.setInteractive({ useHandCursor: true });
+
+    const leaveText = this.add.text(buttonsX + buttonWidth / 2, leaveY + buttonHeight / 2, 'Leave', {
+      fontFamily: FONTS.title,
+      fontSize: '11px',
+      color: COLORS_HEX.textSecondary
+    }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(101);
+
+    leaveBg.on('pointerover', () => {
+      leaveBg.setFillStyle(0x5a3a3a, 1);
+      leaveBg.setStrokeStyle(1, 0x7a4a4a);
+      leaveText.setColor('#ffffff');
+    });
+    leaveBg.on('pointerout', () => {
+      leaveBg.setFillStyle(COLORS.panelBgLight, 1);
+      leaveBg.setStrokeStyle(1, COLORS.border);
+      leaveText.setColor(COLORS_HEX.textSecondary);
+    });
+    leaveBg.on('pointerdown', () => this.leaveGame());
+
+    // === RIGHT SIDE: Minimap ===
+    const mapSize = 85;
+    const mapX = panelWidth - mapSize - 10;
+    const mapY = (panelHeight - mapSize) / 2;
+
+    // Minimap frame background
+    const mapBg = this.add.rectangle(mapX, mapY, mapSize, mapSize, 0x0a0a15, 0.9).setOrigin(0, 0);
+    mapBg.setStrokeStyle(1, COLORS.border);
+    this.navigatorPanel.add(mapBg);
+
+    // Minimap graphics (will be drawn in renderMinimap)
+    this.minimapGraphics = this.add.graphics();
+    this.navigatorPanel.add(this.minimapGraphics);
+  }
+
   private createTargetInfoPanel(): void {
-    // Positioned below player frame (frame is 95px + 10px padding + 10px gap)
-    const x = 10;
-    const y = 115; // Below player frame
+    // Position to the RIGHT of player frame with dynamic gap
+    // Player frame: x=10, y=10, width=220, height=95
+    const playerFrameX = 10;
+    const playerFrameWidth = 220;
+    const gap = 12; // Dynamic gap between panels
+    const x = playerFrameX + playerFrameWidth + gap;
+    const y = 10; // Same vertical position as player frame
+
+    // Panel dimensions (slightly narrower to fit better)
+    const panelWidth = 200;
+    const panelHeight = 95; // Match player frame height
 
     this.targetInfoPanel = this.add.container(x, y).setScrollFactor(0).setDepth(100).setVisible(false);
 
-    // Create background (will be resized dynamically)
-    const bg = this.add.rectangle(0, 0, 260, 90, COLORS.panelBg, 0.92).setOrigin(0, 0);
+    // Create background
+    const bg = this.add.rectangle(0, 0, panelWidth, panelHeight, COLORS.panelBg, 0.92).setOrigin(0, 0);
     bg.setStrokeStyle(2, COLORS.border);
     bg.setName('targetPanelBg');
     this.targetInfoPanel.add(bg);
 
-    // Gold corner decorations (smaller for this compact panel)
+    // Gold corner decorations (matching player frame style)
     const cornerGraphics = this.add.graphics();
-    const cornerSize = 12;
+    const cornerSize = 10;
     cornerGraphics.lineStyle(2, COLORS.borderGold);
     // Top-left
     cornerGraphics.beginPath();
@@ -897,51 +1065,76 @@ export class GameScene extends Phaser.Scene {
     cornerGraphics.lineTo(0, 0);
     cornerGraphics.lineTo(cornerSize, 0);
     cornerGraphics.strokePath();
+    // Top-right
+    cornerGraphics.beginPath();
+    cornerGraphics.moveTo(panelWidth - cornerSize, 0);
+    cornerGraphics.lineTo(panelWidth, 0);
+    cornerGraphics.lineTo(panelWidth, cornerSize);
+    cornerGraphics.strokePath();
+    // Bottom-left
+    cornerGraphics.beginPath();
+    cornerGraphics.moveTo(0, panelHeight - cornerSize);
+    cornerGraphics.lineTo(0, panelHeight);
+    cornerGraphics.lineTo(cornerSize, panelHeight);
+    cornerGraphics.strokePath();
+    // Bottom-right
+    cornerGraphics.beginPath();
+    cornerGraphics.moveTo(panelWidth - cornerSize, panelHeight);
+    cornerGraphics.lineTo(panelWidth, panelHeight);
+    cornerGraphics.lineTo(panelWidth, panelHeight - cornerSize);
+    cornerGraphics.strokePath();
     cornerGraphics.setName('targetPanelCorners');
     this.targetInfoPanel.add(cornerGraphics);
 
+    // Content padding
+    const contentPadding = 10;
+    const contentWidth = panelWidth - contentPadding * 2;
+
     // Enemy name (with max width to prevent overflow)
-    this.targetNameText = this.add.text(12, 10, '', {
+    this.targetNameText = this.add.text(contentPadding, 8, '', {
       fontFamily: FONTS.title,
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#ffffff',
-      wordWrap: { width: 236 }
+      wordWrap: { width: contentWidth }
     });
     this.targetInfoPanel.add(this.targetNameText);
 
     // Enemy type description
-    this.targetTypeText = this.add.text(12, 30, '', {
+    this.targetTypeText = this.add.text(contentPadding, 26, '', {
       fontFamily: FONTS.body,
-      fontSize: '11px',
+      fontSize: '10px',
       color: '#aaaaaa',
-      wordWrap: { width: 236 },
-      lineSpacing: 2
+      wordWrap: { width: contentWidth },
+      lineSpacing: 1
     });
     this.targetInfoPanel.add(this.targetTypeText);
 
     // Boss mechanics/abilities text (position will be set dynamically)
-    this.targetMechanicsText = this.add.text(12, 50, '', {
+    this.targetMechanicsText = this.add.text(contentPadding, 42, '', {
       fontFamily: FONTS.body,
-      fontSize: '10px',
+      fontSize: '9px',
       color: '#ffcc66',
-      wordWrap: { width: 236 },
-      lineSpacing: 4
+      wordWrap: { width: contentWidth },
+      lineSpacing: 2
     });
     this.targetInfoPanel.add(this.targetMechanicsText);
 
-    // Health bar background (position will be set dynamically)
-    const healthBg = this.add.rectangle(12, 55, 236, 14, 0x333333).setOrigin(0, 0);
-    const healthFill = this.add.rectangle(12, 55, 236, 14, 0x22aa22).setOrigin(0, 0);
+    // Health bar (at bottom of panel)
+    const healthBarY = panelHeight - 22;
+    const healthBarWidth = contentWidth;
+    const healthBarHeight = 12;
+    const healthBg = this.add.rectangle(contentPadding, healthBarY, healthBarWidth, healthBarHeight, 0x333333).setOrigin(0, 0);
+    const healthFill = this.add.rectangle(contentPadding, healthBarY, healthBarWidth, healthBarHeight, 0x22aa22).setOrigin(0, 0);
     healthBg.setName('healthBarBg');
     healthFill.setName('healthBarFill');
     this.targetHealthBar = { bg: healthBg, fill: healthFill };
     this.targetInfoPanel.add(healthBg);
     this.targetInfoPanel.add(healthFill);
 
-    // Health text (position will be set dynamically)
-    this.targetHealthText = this.add.text(130, 62, '', {
+    // Health text (centered on bar)
+    this.targetHealthText = this.add.text(contentPadding + healthBarWidth / 2, healthBarY + healthBarHeight / 2, '', {
       fontFamily: FONTS.body,
-      fontSize: '10px',
+      fontSize: '9px',
       color: '#ffffff'
     }).setOrigin(0.5, 0.5);
     this.targetInfoPanel.add(this.targetHealthText);
@@ -1603,6 +1796,53 @@ export class GameScene extends Phaser.Scene {
       const walls = this.roomWalls.get(room.id);
       if (walls) {
         walls.forEach(w => w.setAlpha(alpha));
+      }
+
+      // Room modifier visual overlays
+      if (room.modifier && isCurrent) {
+        let overlay = this.roomModifierOverlays.get(room.id);
+        if (!overlay) {
+          // Create overlay based on modifier type
+          let color = 0x000000;
+          let overlayAlpha = 0.2;
+
+          switch (room.modifier) {
+            case 'dark':
+              color = 0x1a1a2e; // Dark blue-black
+              overlayAlpha = 0.5;
+              break;
+            case 'burning':
+              color = 0xff4400; // Orange-red
+              overlayAlpha = 0.15;
+              break;
+            case 'cursed':
+              color = 0x8b00ff; // Purple
+              overlayAlpha = 0.2;
+              break;
+            case 'blessed':
+              color = 0xffd700; // Gold
+              overlayAlpha = 0.15;
+              break;
+          }
+
+          overlay = this.add.rectangle(
+            room.x + room.width / 2,
+            room.y + room.height / 2,
+            room.width,
+            room.height,
+            color,
+            overlayAlpha
+          );
+          overlay.setDepth(1); // Above floor, below entities
+          this.roomModifierOverlays.set(room.id, overlay);
+        }
+        overlay.setVisible(true);
+      } else {
+        // Hide modifier overlay when not in room
+        const overlay = this.roomModifierOverlays.get(room.id);
+        if (overlay) {
+          overlay.setVisible(false);
+        }
       }
 
       // Draw connections (corridors) with tiled path
@@ -2957,6 +3197,19 @@ export class GameScene extends Phaser.Scene {
           continue;
         }
 
+        // Handle hidden enemies (ambush rooms) - don't render until revealed
+        if (enemy.isHidden) {
+          // Track that this enemy is hidden (for reveal animation later)
+          this.hiddenEnemyIds.add(enemy.id);
+          const existingSprite = this.enemySprites.get(enemy.id);
+          if (existingSprite) {
+            existingSprite.destroy();
+            this.enemySprites.delete(enemy.id);
+          }
+          this.removeHealthBar(enemy.id);
+          continue;
+        }
+
         // Get or create sprite
         let sprite = this.enemySprites.get(enemy.id);
 
@@ -3026,6 +3279,44 @@ export class GameScene extends Phaser.Scene {
           }
 
           this.enemySprites.set(enemy.id, sprite);
+
+          // Ambush reveal animation - play when a hidden enemy becomes visible
+          if (this.hiddenEnemyIds.has(enemy.id) && !this.revealedAmbushEnemyIds.has(enemy.id)) {
+            this.revealedAmbushEnemyIds.add(enemy.id);
+            this.hiddenEnemyIds.delete(enemy.id);
+
+            // Capture sprite for use in callbacks
+            const revealedSprite = sprite;
+
+            // Start with small scale and fade in
+            revealedSprite.setScale(0.1);
+            revealedSprite.setAlpha(0);
+
+            // Play reveal sound
+            this.playSfx('sfxCast', 0.4);
+
+            // Scale and fade in animation
+            this.tweens.add({
+              targets: revealedSprite,
+              scaleX: scale,
+              scaleY: scale,
+              alpha: 1,
+              duration: 300,
+              ease: 'Back.easeOut',
+              onComplete: () => {
+                // Brief red flash after appearing
+                revealedSprite.setTint(0xff4444);
+                this.time.delayedCall(100, () => {
+                  revealedSprite.clearTint();
+                });
+              }
+            });
+
+            // Show notification for first ambush enemy revealed
+            if (this.revealedAmbushEnemyIds.size === 1 || Math.random() < 0.3) {
+              this.showNotification('Ambush!', undefined, 'warning');
+            }
+          }
         }
 
         // Update position
@@ -4312,11 +4603,16 @@ export class GameScene extends Phaser.Scene {
 
     this.minimapGraphics.clear();
 
-    const mapX = this.cameras.main.width - 130;
-    const mapY = 50;
-    const scale = 0.05;
+    // Minimap is inside the navigator panel container (right side)
+    // Coordinates are relative to the container
+    const panelWidth = 200;
+    const panelHeight = 110;
+    const mapSize = 85;
+    const mapX = panelWidth - mapSize - 10 + 3; // Inset from frame
+    const mapY = (panelHeight - mapSize) / 2 + 3;
+    const mapDrawSize = mapSize - 6; // Leave some padding inside the frame
 
-    // Find bounds
+    // Find dungeon bounds
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const room of rooms) {
       minX = Math.min(minX, room.x);
@@ -4325,36 +4621,92 @@ export class GameScene extends Phaser.Scene {
       maxY = Math.max(maxY, room.y + room.height);
     }
 
-    // Draw minimap background
-    this.minimapGraphics.fillStyle(0x000000, 0.7);
-    this.minimapGraphics.fillRect(mapX - 5, mapY - 5, 120, 120);
+    // Calculate scale to fit dungeon in map area
+    const dungeonWidth = maxX - minX;
+    const dungeonHeight = maxY - minY;
+    const scale = Math.min(mapDrawSize / dungeonWidth, mapDrawSize / dungeonHeight) * 0.9;
 
-    // Draw rooms on minimap
+    // Center the dungeon in the map area
+    const scaledWidth = dungeonWidth * scale;
+    const scaledHeight = dungeonHeight * scale;
+    const offsetX = mapX + (mapDrawSize - scaledWidth) / 2;
+    const offsetY = mapY + (mapDrawSize - scaledHeight) / 2;
+
+    // Draw corridors first (connections between rooms)
+    this.minimapGraphics.lineStyle(2, 0x333344, 0.8);
     for (const room of rooms) {
-      const rx = mapX + (room.x - minX) * scale;
-      const ry = mapY + (room.y - minY) * scale;
-      const rw = room.width * scale;
-      const rh = room.height * scale;
+      const roomCenterX = offsetX + (room.x + room.width / 2 - minX) * scale;
+      const roomCenterY = offsetY + (room.y + room.height / 2 - minY) * scale;
 
-      // Room color
-      let color = 0x666666;
-      if (room.type === 'boss') color = 0xaa4444;
-      else if (room.type === 'rare') color = 0xaaaa44;
-      else if (room.cleared) color = 0x448844;
-
-      if (room.id === currentRoomId) color = 0xffffff;
-
-      this.minimapGraphics.fillStyle(color, 1);
-      this.minimapGraphics.fillRect(rx, ry, Math.max(rw, 4), Math.max(rh, 4));
+      for (const connectedId of room.connectedTo) {
+        const connected = rooms.find(r => r.id === connectedId);
+        if (connected) {
+          const connectedCenterX = offsetX + (connected.x + connected.width / 2 - minX) * scale;
+          const connectedCenterY = offsetY + (connected.y + connected.height / 2 - minY) * scale;
+          this.minimapGraphics.beginPath();
+          this.minimapGraphics.moveTo(roomCenterX, roomCenterY);
+          this.minimapGraphics.lineTo(connectedCenterX, connectedCenterY);
+          this.minimapGraphics.strokePath();
+        }
+      }
     }
 
-    // Draw player position
+    // Draw rooms on minimap
+    let clearedCount = 0;
+    for (const room of rooms) {
+      const rx = offsetX + (room.x - minX) * scale;
+      const ry = offsetY + (room.y - minY) * scale;
+      const rw = Math.max(room.width * scale, 6);
+      const rh = Math.max(room.height * scale, 6);
+
+      // Room color based on type and state
+      let color = 0x444455; // Default unexplored
+      let alpha = 0.7;
+
+      if (room.cleared) {
+        color = 0x2a5a2a; // Cleared - muted green
+        clearedCount++;
+      }
+      if (room.type === 'boss') color = 0x773333; // Boss room - dark red
+      else if (room.type === 'rare') color = 0x777733; // Rare room - gold tint
+      else if (room.type === 'start') color = 0x335577; // Start room - blue tint
+
+      // Current room is highlighted
+      if (room.id === currentRoomId) {
+        color = 0xc9a227; // Gold for current room
+        alpha = 1;
+      }
+
+      this.minimapGraphics.fillStyle(color, alpha);
+      this.minimapGraphics.fillRoundedRect(rx, ry, rw, rh, 2);
+
+      // Add subtle border for current room
+      if (room.id === currentRoomId) {
+        this.minimapGraphics.lineStyle(1, 0xffd700, 0.8);
+        this.minimapGraphics.strokeRoundedRect(rx, ry, rw, rh, 2);
+      }
+    }
+
+    // Draw player position with pulsing effect
     const player = wsClient.getCurrentPlayer();
     if (player) {
-      const px = mapX + (player.position.x - minX) * scale;
-      const py = mapY + (player.position.y - minY) * scale;
+      const px = offsetX + (player.position.x - minX) * scale;
+      const py = offsetY + (player.position.y - minY) * scale;
+
+      // Outer glow
+      this.minimapGraphics.fillStyle(0x00ff00, 0.3);
+      this.minimapGraphics.fillCircle(px, py, 5);
+
+      // Inner dot
       this.minimapGraphics.fillStyle(0x00ff00, 1);
       this.minimapGraphics.fillCircle(px, py, 3);
+    }
+
+    // Update navigator panel info text
+    const state = wsClient.currentState;
+    if (state && this.navigatorFloorText && this.navigatorRoomText) {
+      this.navigatorFloorText.setText(`Floor ${state.floor}`);
+      this.navigatorRoomText.setText(`${clearedCount}/${rooms.length} explored`);
     }
   }
 
@@ -4516,10 +4868,24 @@ export class GameScene extends Phaser.Scene {
   private updateBuffsUI(): void {
     const player = wsClient.getCurrentPlayer();
 
-    // Hide all buff icons first
+    // Hide all buff icons first and disable their input
     for (let i = 0; i < this.buffIcons.length; i++) {
-      this.buffIcons[i].setVisible(false);
+      const icon = this.buffIcons[i];
+      icon.setVisible(false);
+      if (icon.input) {
+        (icon.input as Phaser.Types.Input.InteractiveObject).enabled = false;
+      }
       this.buffTexts[i].setText('');
+    }
+
+    // Hide tooltip if hovered buff no longer exists
+    if (this.hoveredBuffSlot >= 0) {
+      const buffCount = player?.buffs?.length ?? 0;
+      if (this.hoveredBuffSlot >= buffCount) {
+        // The buff we were hovering has expired
+        this.buffTooltip?.setVisible(false);
+        this.hoveredBuffSlot = -1;
+      }
     }
 
     if (!player || !player.buffs) {
@@ -4540,6 +4906,10 @@ export class GameScene extends Phaser.Scene {
       const text = this.buffTexts[i];
 
       icon.setVisible(true);
+      // Ensure input is enabled when icon becomes visible
+      if (icon.input) {
+        (icon.input as Phaser.Types.Input.InteractiveObject).enabled = true;
+      }
 
       // Set the correct texture based on buff icon
       const textureKey = this.getBuffTextureKey(buff.icon, buff.isDebuff);
@@ -4775,9 +5145,11 @@ export class GameScene extends Phaser.Scene {
     // Update panel visibility and content
     this.targetInfoPanel?.setVisible(true);
 
-    const padding = 12;
-    const barWidth = 236;
-    const barHeight = 14;
+    // Match the panel dimensions from createTargetInfoPanel
+    const panelWidth = 200;
+    const padding = 10;
+    const barWidth = panelWidth - padding * 2; // 180
+    const barHeight = 12;
 
     // Update name with color based on type
     if (this.targetNameText) {
@@ -4862,11 +5234,43 @@ export class GameScene extends Phaser.Scene {
       this.targetHealthText.setText(`${Math.ceil(targetEnemy.stats.health)} / ${targetEnemy.stats.maxHealth}`);
     }
 
-    // Resize background to fit content
-    const panelHeight = healthBarY + barHeight + padding;
+    // Resize background to fit content (keep width fixed, adjust height)
+    const dynamicPanelHeight = healthBarY + barHeight + padding;
     const bg = this.targetInfoPanel?.getByName('targetPanelBg') as Phaser.GameObjects.Rectangle;
     if (bg) {
-      bg.setSize(260, panelHeight);
+      bg.setSize(panelWidth, dynamicPanelHeight);
+    }
+
+    // Update corner decorations to match new height
+    const corners = this.targetInfoPanel?.getByName('targetPanelCorners') as Phaser.GameObjects.Graphics;
+    if (corners) {
+      corners.clear();
+      const cornerSize = 10;
+      corners.lineStyle(2, COLORS.borderGold);
+      // Top-left
+      corners.beginPath();
+      corners.moveTo(0, cornerSize);
+      corners.lineTo(0, 0);
+      corners.lineTo(cornerSize, 0);
+      corners.strokePath();
+      // Top-right
+      corners.beginPath();
+      corners.moveTo(panelWidth - cornerSize, 0);
+      corners.lineTo(panelWidth, 0);
+      corners.lineTo(panelWidth, cornerSize);
+      corners.strokePath();
+      // Bottom-left
+      corners.beginPath();
+      corners.moveTo(0, dynamicPanelHeight - cornerSize);
+      corners.lineTo(0, dynamicPanelHeight);
+      corners.lineTo(cornerSize, dynamicPanelHeight);
+      corners.strokePath();
+      // Bottom-right
+      corners.beginPath();
+      corners.moveTo(panelWidth - cornerSize, dynamicPanelHeight);
+      corners.lineTo(panelWidth, dynamicPanelHeight);
+      corners.lineTo(panelWidth, dynamicPanelHeight - cornerSize);
+      corners.strokePath();
     }
   }
 
@@ -5136,6 +5540,8 @@ export class GameScene extends Phaser.Scene {
       // Clear tracking sets for new floor
       this.notifiedEnemyIds.clear();
       this.knownPetIds.clear();
+      this.revealedAmbushEnemyIds.clear();
+      this.hiddenEnemyIds.clear();
 
       // Save character and update leaderboard
       const player = wsClient.getCurrentPlayer();
@@ -6794,14 +7200,7 @@ export class GameScene extends Phaser.Scene {
     this.inputManager?.setTarget(null);
   }
 
-  private copyInviteLink(): void {
-    const link = wsClient.getInviteLink();
-    navigator.clipboard.writeText(link).then(() => {
-      this.showNotification('Invite link copied!', undefined, 'success');
-    }).catch(() => {
-      this.showNotification('Failed to copy link');
-    });
-  }
+  // NOTE: copyInviteLink removed - game is now single-player only
 
   private saveGame(): void {
     const success = wsClient.saveCharacter();

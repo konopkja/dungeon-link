@@ -3,7 +3,7 @@ import {
   RunState, Player, ClassName, Equipment, EquipSlot, Rarity, Buff,
   PlayerInput, CombatEvent, LootDrop, Position, Enemy, PotionType, Pet, AbilityType,
   GroundEffect, GroundEffectType, SaveData, VendorService, TargetType, GroundItem,
-  Trap, Chest, TrapType, FloorTheme, EnemyType
+  Trap, Chest, TrapType, FloorTheme, EnemyType, createRunTracking
 } from '@dungeon-link/shared';
 import { getVendorServices, purchaseLevelUp, purchaseAbilityTrain, createVendor, createShopVendor, createCryptoVendor, getShopServices, sellItem, sellAllItems } from './Vendor.js';
 import { GAME_CONFIG, SPRITE_CONFIG } from '@dungeon-link/shared';
@@ -20,54 +20,21 @@ export class GameStateManager {
   private playerToRun: Map<string, string> = new Map();
   private lastUpdate: Map<string, number> = new Map();
 
-  // Track attack cooldowns (entityId -> remaining cooldown in seconds)
-  private attackCooldowns: Map<string, number> = new Map();
+  // ==========================================================================
+  // CONSTANTS - All per-run tracking Maps are now in RunState.tracking
+  // This fixes the memory leak where global Maps accumulated stale entity IDs
+  // ==========================================================================
 
-  // Track boss ability cooldowns (bossId_abilityId -> remaining cooldown in seconds)
-  private bossAbilityCooldowns: Map<string, number> = new Map();
-
-  // Track boss AoE ability cooldowns separately (for ground effects)
-  private bossAoECooldowns: Map<string, number> = new Map();
-
-  // Track elite enemy special attack cooldowns
-  private eliteAttackCooldowns: Map<string, number> = new Map();
   private readonly ELITE_SPECIAL_COOLDOWN = 6; // 6 seconds between special attacks
-
-  // Track ground effect damage ticks (effectId_playerId -> last tick time)
-  private groundEffectDamageTicks: Map<string, number> = new Map();
-
-  // Track player movement directions (playerId -> { moveX, moveY })
-  private playerMovement: Map<string, { moveX: number; moveY: number }> = new Map();
-
-  // Track player momentum for ice sliding (Frozen theme)
-  private playerMomentum: Map<string, { vx: number; vy: number }> = new Map();
-
-  // Track boss fight start times (bossId -> start timestamp in ms)
-  private bossFightStartTimes: Map<string, number> = new Map();
-
-  // Track enemy aggro times (enemyId -> timestamp when enemy first saw a player)
-  // Enemies can't deal damage for 1 second after aggro
-  private enemyAggroTimes: Map<string, number> = new Map();
   private readonly ENEMY_AGGRO_DELAY = 1.0; // 1 second delay before enemies can damage
-
-  // Track when enemies lost their target for leash reset
-  private enemyLeashTimers: Map<string, number> = new Map();
+  private readonly ENEMY_AGGRO_DELAY_PATROL = 0.3; // Reduced delay for patrolling enemies (already alert)
   private readonly ENEMY_LEASH_RESET_DELAY = 3000; // 3 seconds after losing target, reset
   private readonly ENEMY_LEASH_DISTANCE = 400; // Max distance from spawn before leash kicks in
-
-  // Player death time tracking for respawn delay
-  private playerDeathTimes: Map<string, number> = new Map();
   private readonly RESPAWN_DELAY = 3000; // 3 second respawn delay
-
-  // Attack speed constants
   private readonly ENEMY_ATTACK_COOLDOWN = 2.0; // Enemies attack every 2 seconds
   private readonly PLAYER_AUTO_ATTACK_COOLDOWN = 1.5; // Players auto-attack every 1.5 seconds
   private readonly MELEE_RANGE = 60;
   private readonly RANGED_RANGE = 300;
-
-  // Enemy charge attack tracking
-  private enemyCharging: Map<string, { targetId: string; startTime: number }> = new Map();
-  private enemyChargeCooldowns: Map<string, number> = new Map();
   private readonly CHARGE_COOLDOWN = 8; // 8 seconds between charges
   private readonly CHARGE_SPEED = 250; // Fast charge speed
   private readonly CHARGE_TRIGGER_DISTANCE = 200; // Start charging when this far from target
@@ -102,7 +69,8 @@ export class GameStateManager {
       inCombat: false,
       pendingLoot: [],
       partyScaling,
-      groundEffects: []
+      groundEffects: [],
+      tracking: createRunTracking()
     };
 
     this.runs.set(runId, state);
@@ -206,7 +174,8 @@ export class GameStateManager {
       inCombat: false,
       pendingLoot: [],
       partyScaling,
-      groundEffects: []
+      groundEffects: [],
+      tracking: createRunTracking()
     };
 
     this.runs.set(runId, state);
@@ -221,68 +190,18 @@ export class GameStateManager {
     return { runId, playerId, state };
   }
 
-  /**
-   * Join an existing run
-   */
-  joinRun(runId: string, playerName: string, classId: ClassName): { playerId: string; state: RunState } | null {
-    const state = this.runs.get(runId);
-    if (!state) return null;
-
-    if (state.players.length >= GAME_CONFIG.MAX_PARTY_SIZE) {
-      return null;
-    }
-
-    const playerId = uuidv4().slice(0, 8);
-    const player = this.createPlayer(playerId, playerName, classId);
-
-    // Set spawn position based on player count
-    player.position = getPlayerSpawnPosition(state.dungeon, state.players.length);
-
-    state.players.push(player);
-    this.playerToRun.set(playerId, runId);
-
-    // Recalculate party scaling
-    const avgItemPower = getPartyAverageItemPower(state.players);
-    state.partyScaling = getPartyScaling(state.players.length, avgItemPower);
-
-    // Regenerate dungeon with new scaling
-    state.dungeon = generateDungeon(
-      runId,
-      state.floor,
-      state.players.length,
-      avgItemPower
-    );
-
-    // Reposition all players
-    state.players.forEach((p, i) => {
-      p.position = getPlayerSpawnPosition(state.dungeon, i);
-    });
-
-    return { playerId, state };
-  }
+  // NOTE: joinRun removed - game is now single-player only
 
   /**
-   * Remove a player from their run
+   * Remove a player from their run (single-player: always deletes the run)
    */
   removePlayer(playerId: string): void {
     const runId = this.playerToRun.get(playerId);
     if (!runId) return;
 
-    const state = this.runs.get(runId);
-    if (!state) return;
-
-    state.players = state.players.filter(p => p.id !== playerId);
     this.playerToRun.delete(playerId);
-
-    // If no players left, delete the run
-    if (state.players.length === 0) {
-      this.runs.delete(runId);
-      this.lastUpdate.delete(runId);
-    } else {
-      // Recalculate scaling
-      const avgItemPower = getPartyAverageItemPower(state.players);
-      state.partyScaling = getPartyScaling(state.players.length, avgItemPower);
-    }
+    this.runs.delete(runId);
+    this.lastUpdate.delete(runId);
   }
 
   /**
@@ -327,7 +246,7 @@ export class GameStateManager {
     const events: CombatEvent[] = [];
 
     // Store movement direction (will be applied continuously in update)
-    this.playerMovement.set(playerId, { moveX: input.moveX, moveY: input.moveY });
+    state.tracking.playerMovement.set(playerId, { moveX: input.moveX, moveY: input.moveY });
 
     // Process ability cast
     if (input.castAbility) {
@@ -377,8 +296,8 @@ export class GameStateManager {
       // Start boss fight timer if targeting a boss
       if (target && 'isBoss' in target && (target as Enemy).isBoss) {
         const bossEnemy = target as Enemy;
-        if (!this.bossFightStartTimes.has(bossEnemy.id)) {
-          this.bossFightStartTimes.set(bossEnemy.id, Date.now());
+        if (!state.tracking.bossFightStartTimes.has(bossEnemy.id)) {
+          state.tracking.bossFightStartTimes.set(bossEnemy.id, Date.now());
           console.log(`[DEBUG] Boss fight started (ability): ${bossEnemy.name}`);
         }
       }
@@ -551,7 +470,7 @@ export class GameStateManager {
         // Check if player is in combat (any enemy in current room targeting them or has aggro)
         const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
         const inCombat = currentRoom?.enemies.some(e =>
-          e.isAlive && (e.targetId === player.id || this.enemyAggroTimes.has(e.id))
+          e.isAlive && (e.targetId === player.id || state.tracking.enemyAggroTimes.has(e.id))
         ) ?? false;
 
         if (inCombat) {
@@ -571,7 +490,7 @@ export class GameStateManager {
               if (enemy.targetId === player.id) {
                 enemy.targetId = null;
                 // Also clear aggro so they don't immediately re-aggro
-                this.enemyAggroTimes.delete(enemy.id);
+                state.tracking.enemyAggroTimes.delete(enemy.id);
               }
             }
           }
@@ -637,15 +556,15 @@ export class GameStateManager {
         }
 
         // Apply continuous movement with collision checking
-        const movement = this.playerMovement.get(player.id);
+        const movement = state.tracking.playerMovement.get(player.id);
         const isFrozenTheme = state.dungeon.theme === FloorTheme.Frozen;
         const movementModifier = state.dungeon.themeModifiers?.movementModifier || 1.0;
 
         // Get or initialize momentum
-        let momentum = this.playerMomentum.get(player.id);
+        let momentum = state.tracking.playerMomentum.get(player.id);
         if (!momentum) {
           momentum = { vx: 0, vy: 0 };
-          this.playerMomentum.set(player.id, momentum);
+          state.tracking.playerMomentum.set(player.id, momentum);
         }
 
         // Apply stealth slow (25% slower while in rogue_stealth)
@@ -753,13 +672,20 @@ export class GameStateManager {
 
             if (shouldTransition) {
               console.log(`[DEBUG] Player ${player.name} entered ${newRoom.id} (from ${state.dungeon.currentRoomId}), enemies: ${newRoom.enemies.filter(e => e.isAlive).length}, strictlyInside: ${strictlyInsideNewRoom}`);
+
+              // Remove room modifier buffs from previous room
+              const oldRoom = currentRoom;
+              if (oldRoom?.modifier) {
+                this.removeRoomModifierBuffs(state, player, oldRoom.modifier);
+              }
+
               state.dungeon.currentRoomId = newRoom.id;
 
               // Clear aggro times for enemies in the new room so they have fresh aggro delay
               for (const enemy of newRoom.enemies) {
-                this.enemyAggroTimes.delete(enemy.id);
+                state.tracking.enemyAggroTimes.delete(enemy.id);
                 // Reset attack cooldowns so enemies don't immediately attack
-                this.attackCooldowns.delete(enemy.id);
+                state.tracking.attackCooldowns.delete(enemy.id);
 
                 // Ensure enemy position is inside the room (fix stuck enemies)
                 const roomCenterX = newRoom.x + newRoom.width / 2;
@@ -805,10 +731,200 @@ export class GameStateManager {
       // Process player auto-attacks
       const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
 
+      // BUG FIX: Check for patrolling enemies from OTHER rooms that have physically entered the current room
+      // This MUST run before auto-attacks so players can target patrols
+      // The idle patrol loop skips the current room, so patrols might be physically here but not in this room's array
+      if (currentRoom) {
+        // Debug: Log all patrolling enemies every 5 seconds
+        if (Math.random() < 0.03) {
+          let patrolCount = 0;
+          for (const room of state.dungeon.rooms) {
+            for (const enemy of room.enemies) {
+              if (enemy.isPatrolling) {
+                patrolCount++;
+                console.log(`[DEBUG] Patrol ${enemy.name} in ${room.id}, pos=(${Math.round(enemy.position.x)},${Math.round(enemy.position.y)}), waypoint=${enemy.currentWaypointIndex}/${enemy.patrolWaypoints?.length || 0}`);
+              }
+            }
+          }
+          if (patrolCount === 0) {
+            console.log(`[DEBUG] No patrols found on floor ${state.floor}`);
+          }
+        }
+
+        for (const otherRoom of state.dungeon.rooms) {
+          if (otherRoom.id === currentRoom.id) continue;
+
+          const patrolsToMove: Enemy[] = [];
+          for (const enemy of otherRoom.enemies) {
+            if (!enemy.isAlive) continue;
+            if (!enemy.isPatrolling) continue;
+
+            // Check if this patrol is physically inside the current room
+            const inCurrentRoom =
+              enemy.position.x >= currentRoom.x &&
+              enemy.position.x <= currentRoom.x + currentRoom.width &&
+              enemy.position.y >= currentRoom.y &&
+              enemy.position.y <= currentRoom.y + currentRoom.height;
+
+            if (inCurrentRoom) {
+              patrolsToMove.push(enemy);
+              console.log(`[DEBUG] Patrol ${enemy.name} detected in player room! pos=(${Math.round(enemy.position.x)},${Math.round(enemy.position.y)}) room bounds=(${currentRoom.x},${currentRoom.y},${currentRoom.width}x${currentRoom.height})`);
+            }
+          }
+
+          // Move patrols to current room's enemies array
+          for (const patrol of patrolsToMove) {
+            otherRoom.enemies = otherRoom.enemies.filter(e => e.id !== patrol.id);
+            currentRoom.enemies.push(patrol);
+            patrol.currentRoomId = currentRoom.id;
+
+            // BUG FIX: Un-clear the room so the enemy AI loop will process the patrol
+            if (currentRoom.cleared) {
+              currentRoom.cleared = false;
+              console.log(`[DEBUG] Room ${currentRoom.id} un-cleared due to patrol entering`);
+            }
+
+            console.log(`[DEBUG] Moved patrol ${patrol.name} from ${otherRoom.id} to ${currentRoom.id} (player room)`);
+          }
+        }
+      }
+
+      // ============================================
+      // ROOM VARIANT: Ambush Trigger
+      // ============================================
+      if (currentRoom?.variant === 'ambush' && !state.tracking.ambushTriggered.has(currentRoom.id)) {
+        const roomCenter = {
+          x: currentRoom.x + currentRoom.width / 2,
+          y: currentRoom.y + currentRoom.height / 2
+        };
+
+        // Check if any player is near center
+        for (const player of state.players) {
+          if (!player.isAlive) continue;
+
+          const dist = Math.hypot(
+            player.position.x - roomCenter.x,
+            player.position.y - roomCenter.y
+          );
+
+          // Trigger ambush when player reaches center area (within 60 units)
+          if (dist < 60) {
+            state.tracking.ambushTriggered.add(currentRoom.id);
+
+            // Reveal all hidden enemies
+            let revealedCount = 0;
+            for (const enemy of currentRoom.enemies) {
+              if (enemy.isHidden && enemy.isAlive) {
+                enemy.isHidden = false;
+                revealedCount++;
+              }
+            }
+
+            console.log(`[AMBUSH] Room ${currentRoom.id} triggered! Revealed ${revealedCount} hidden enemies.`);
+            break;
+          }
+        }
+      }
+
+      // ============================================
+      // ROOM MODIFIER: Environmental Effects
+      // ============================================
+      if (currentRoom?.modifier) {
+        for (const player of state.players) {
+          if (!player.isAlive) continue;
+
+          switch (currentRoom.modifier) {
+            case 'burning': {
+              // Deal fire damage every 2 seconds
+              const tickKey = `${player.id}_${currentRoom.id}`;
+              const lastTick = state.tracking.modifierDamageTicks.get(tickKey) ?? 0;
+              const now = Date.now();
+
+              if (now - lastTick >= 2000) { // 2 second interval
+                const damage = 5 + state.dungeon.floor * 2;
+                player.stats.health = Math.max(0, player.stats.health - damage);
+                state.tracking.modifierDamageTicks.set(tickKey, now);
+
+                // Create combat event for visual feedback
+                events.push({
+                  sourceId: 'room_burning',
+                  targetId: player.id,
+                  damage,
+                  isCrit: false
+                });
+
+                if (player.stats.health <= 0) {
+                  player.isAlive = false;
+                  events.push({
+                    sourceId: 'room_burning',
+                    targetId: player.id,
+                    damage: 0,
+                    killed: true
+                  });
+                }
+              }
+              break;
+            }
+
+            case 'cursed': {
+              // Apply stat debuff (handled via temporary stat modification)
+              // Check if debuff already applied this room visit
+              const hasCurseDebuff = player.buffs.some(b => b.id === 'room_curse');
+              if (!hasCurseDebuff) {
+                player.buffs.push({
+                  id: 'room_curse',
+                  name: 'Cursed Ground',
+                  icon: 'curse',
+                  duration: 999999, // Permanent while in room (removed on exit)
+                  maxDuration: 999999,
+                  isDebuff: true,
+                  statModifiers: {
+                    armor: player.stats.armor - 10,
+                    resist: player.stats.resist - 5
+                  }
+                });
+                // Apply stat reduction
+                player.stats.armor = Math.max(0, player.stats.armor - 10);
+                player.stats.resist = Math.max(0, player.stats.resist - 5);
+              }
+              break;
+            }
+
+            case 'blessed': {
+              // Apply stat buff
+              const hasBlessBuff = player.buffs.some(b => b.id === 'room_bless');
+              if (!hasBlessBuff) {
+                player.buffs.push({
+                  id: 'room_bless',
+                  name: 'Blessed Ground',
+                  icon: 'bless',
+                  duration: 999999,
+                  maxDuration: 999999,
+                  isDebuff: false,
+                  statModifiers: {
+                    armor: player.stats.armor + 10,
+                    crit: player.stats.crit + 5
+                  }
+                });
+                // Apply stat boost
+                player.stats.armor += 10;
+                player.stats.crit += 5;
+              }
+              break;
+            }
+
+            case 'dark':
+              // Visual effect only - handled on client
+              break;
+          }
+        }
+      }
+
       // Debug: log current room info (10% of the time to avoid spam)
       if (currentRoom && Math.random() < 0.10) {
         const aliveEnemies = currentRoom.enemies.filter(e => e.isAlive);
-        console.log(`[DEBUG] Processing room ${currentRoom.id}, enemies: ${aliveEnemies.length}, cleared: ${currentRoom.cleared}`);
+        const hiddenCount = currentRoom.enemies.filter(e => e.isHidden && e.isAlive).length;
+        console.log(`[DEBUG] Processing room ${currentRoom.id}, enemies: ${aliveEnemies.length} (${hiddenCount} hidden), cleared: ${currentRoom.cleared}, variant: ${currentRoom.variant || 'standard'}, modifier: ${currentRoom.modifier || 'none'}`);
       }
 
       if (currentRoom && !currentRoom.cleared) {
@@ -816,9 +932,9 @@ export class GameStateManager {
           if (!player.isAlive || !player.targetId) continue;
 
           // Update player attack cooldown
-          const playerCd = this.attackCooldowns.get(player.id) ?? 0;
+          const playerCd = state.tracking.attackCooldowns.get(player.id) ?? 0;
           if (playerCd > 0) {
-            this.attackCooldowns.set(player.id, Math.max(0, playerCd - deltaTime));
+            state.tracking.attackCooldowns.set(player.id, Math.max(0, playerCd - deltaTime));
             continue;
           }
 
@@ -854,8 +970,8 @@ export class GameStateManager {
             }
 
             // Start boss fight timer if this is the first hit on a boss
-            if (targetEnemy.isBoss && !this.bossFightStartTimes.has(targetEnemy.id)) {
-              this.bossFightStartTimes.set(targetEnemy.id, Date.now());
+            if (targetEnemy.isBoss && !state.tracking.bossFightStartTimes.has(targetEnemy.id)) {
+              state.tracking.bossFightStartTimes.set(targetEnemy.id, Date.now());
               console.log(`[DEBUG] Boss fight started: ${targetEnemy.name}`);
             }
 
@@ -955,14 +1071,14 @@ export class GameStateManager {
             const attackCooldown = hasBladeFlurry
               ? this.PLAYER_AUTO_ATTACK_COOLDOWN / 2
               : this.PLAYER_AUTO_ATTACK_COOLDOWN;
-            this.attackCooldowns.set(player.id, attackCooldown);
+            state.tracking.attackCooldowns.set(player.id, attackCooldown);
           }
         }
 
         // Process enemy AI
-
         for (const enemy of currentRoom.enemies) {
           if (!enemy.isAlive) continue;
+          if (enemy.isHidden) continue; // Ambush enemies don't act until revealed
 
           // Skip all AI if enemy is stunned (Blind or Judgment)
           const isStunned = enemy.debuffs?.some(d =>
@@ -984,24 +1100,27 @@ export class GameStateManager {
             enemy.isPatrolling = false;
             enemy.patrolRoute = undefined;
             enemy.patrolTargetRoomId = undefined;
-            // Reset aggro time so enemy has fresh aggro delay
-            this.enemyAggroTimes.delete(enemy.id);
+            enemy.patrolWaypoints = undefined;
+            // BUG FIX: Mark as ex-patroller for reduced aggro delay
+            enemy.wasPatrolling = true;
+            // Reset aggro time so enemy has fresh aggro delay (but shorter for patrollers)
+            state.tracking.enemyAggroTimes.delete(enemy.id);
             // Reset attack cooldown so enemy doesn't immediately attack
-            this.attackCooldowns.delete(enemy.id);
-            console.log(`[DEBUG] Patrolling enemy ${enemy.name} entered combat mode`);
+            state.tracking.attackCooldowns.delete(enemy.id);
+            console.log(`[DEBUG] Patrolling enemy ${enemy.name} entered combat mode (reduced aggro delay)`);
           }
 
           // Update enemy attack cooldown
-          const enemyCd = this.attackCooldowns.get(enemy.id) ?? 0;
+          const enemyCd = state.tracking.attackCooldowns.get(enemy.id) ?? 0;
           if (enemyCd > 0) {
-            this.attackCooldowns.set(enemy.id, Math.max(0, enemyCd - deltaTime));
+            state.tracking.attackCooldowns.set(enemy.id, Math.max(0, enemyCd - deltaTime));
           }
 
           // Elite enemy special attack (telegraphed ground effect)
           if (enemy.isElite && !enemy.isBoss) {
-            const eliteCd = this.eliteAttackCooldowns.get(enemy.id) ?? 0;
+            const eliteCd = state.tracking.eliteAttackCooldowns.get(enemy.id) ?? 0;
             if (eliteCd > 0) {
-              this.eliteAttackCooldowns.set(enemy.id, Math.max(0, eliteCd - deltaTime));
+              state.tracking.eliteAttackCooldowns.set(enemy.id, Math.max(0, eliteCd - deltaTime));
             } else {
               // Find nearest player for targeting (only players in current room)
               const roomPadding = 200;
@@ -1034,7 +1153,7 @@ export class GameStateManager {
                 };
 
                 state.groundEffects.push(groundEffect);
-                this.eliteAttackCooldowns.set(enemy.id, this.ELITE_SPECIAL_COOLDOWN);
+                state.tracking.eliteAttackCooldowns.set(enemy.id, this.ELITE_SPECIAL_COOLDOWN);
               }
             }
           }
@@ -1046,16 +1165,16 @@ export class GameStateManager {
             // Update boss ability cooldowns
             for (const abilityId of bossAbilities) {
               const cdKey = `${enemy.id}_${abilityId}`;
-              const abilityCd = this.bossAbilityCooldowns.get(cdKey) ?? 0;
+              const abilityCd = state.tracking.bossAbilityCooldowns.get(cdKey) ?? 0;
               if (abilityCd > 0) {
-                this.bossAbilityCooldowns.set(cdKey, Math.max(0, abilityCd - deltaTime));
+                state.tracking.bossAbilityCooldowns.set(cdKey, Math.max(0, abilityCd - deltaTime));
               }
             }
 
             // Try to cast an ability
             for (const abilityId of bossAbilities) {
               const cdKey = `${enemy.id}_${abilityId}`;
-              if ((this.bossAbilityCooldowns.get(cdKey) ?? 0) <= 0) {
+              if ((state.tracking.bossAbilityCooldowns.get(cdKey) ?? 0) <= 0) {
                 // Find a target player (exclude stealthed players, only in current room)
                 const roomPadding = 200;
                 const alivePlayers = state.players.filter(p => {
@@ -1092,7 +1211,7 @@ export class GameStateManager {
 
                   // Set ability cooldown (5-10 seconds depending on ability)
                   const cooldown = 5 + Math.random() * 5;
-                  this.bossAbilityCooldowns.set(cdKey, cooldown);
+                  state.tracking.bossAbilityCooldowns.set(cdKey, cooldown);
 
                   // Only cast one ability per tick
                   break;
@@ -1102,10 +1221,10 @@ export class GameStateManager {
 
             // Boss AoE ability casting (ground effects)
             const aoECdKey = `${enemy.id}_aoe`;
-            const aoECd = this.bossAoECooldowns.get(aoECdKey) ?? 0;
+            const aoECd = state.tracking.bossAoECooldowns.get(aoECdKey) ?? 0;
 
             if (aoECd > 0) {
-              this.bossAoECooldowns.set(aoECdKey, Math.max(0, aoECd - deltaTime));
+              state.tracking.bossAoECooldowns.set(aoECdKey, Math.max(0, aoECd - deltaTime));
             } else {
               // Spawn an AoE effect based on boss type and floor (exclude stealthed players, only in current room)
               const roomPadding = 200;
@@ -1123,7 +1242,7 @@ export class GameStateManager {
                   state.groundEffects.push(groundEffect);
                   // Set cooldown based on floor (faster on higher floors)
                   const aoECooldown = Math.max(4, 10 - state.floor * 0.5);
-                  this.bossAoECooldowns.set(aoECdKey, aoECooldown);
+                  state.tracking.bossAoECooldowns.set(aoECdKey, aoECooldown);
                 }
               }
             }
@@ -1151,7 +1270,7 @@ export class GameStateManager {
                   enemy.position.x = newPos.x;
                   enemy.position.y = newPos.y;
                 }
-              } else if ((this.attackCooldowns.get(enemy.id) ?? 0) <= 0) {
+              } else if ((state.tracking.attackCooldowns.get(enemy.id) ?? 0) <= 0) {
                 // Attack the pet
                 const isMagic = enemy.type === 'caster';
                 const baseDamage = isMagic ? enemy.stats.spellPower : enemy.stats.attackPower;
@@ -1173,7 +1292,7 @@ export class GameStateManager {
                   killed: !tauntingPet.isAlive
                 });
 
-                this.attackCooldowns.set(enemy.id, this.ENEMY_ATTACK_COOLDOWN);
+                state.tracking.attackCooldowns.set(enemy.id, this.ENEMY_ATTACK_COOLDOWN);
               }
             } else {
               // Move towards pet with obstacle avoidance
@@ -1247,19 +1366,19 @@ export class GameStateManager {
 
                 if (distFromSpawn > this.ENEMY_LEASH_DISTANCE) {
                   // Enemy is far from spawn with no target - start leash timer
-                  if (!this.enemyLeashTimers.has(enemy.id)) {
-                    this.enemyLeashTimers.set(enemy.id, Date.now());
+                  if (!state.tracking.enemyLeashTimers.has(enemy.id)) {
+                    state.tracking.enemyLeashTimers.set(enemy.id, Date.now());
                   } else {
-                    const leashStartTime = this.enemyLeashTimers.get(enemy.id)!;
+                    const leashStartTime = state.tracking.enemyLeashTimers.get(enemy.id)!;
                     if (Date.now() - leashStartTime >= this.ENEMY_LEASH_RESET_DELAY) {
                       // Leash timer expired - reset enemy to spawn
                       enemy.position.x = enemy.spawnPosition.x;
                       enemy.position.y = enemy.spawnPosition.y;
                       enemy.stats.health = enemy.stats.maxHealth;
                       enemy.targetId = null;
-                      this.enemyAggroTimes.delete(enemy.id);
-                      this.enemyLeashTimers.delete(enemy.id);
-                      this.attackCooldowns.delete(enemy.id);
+                      state.tracking.enemyAggroTimes.delete(enemy.id);
+                      state.tracking.enemyLeashTimers.delete(enemy.id);
+                      state.tracking.attackCooldowns.delete(enemy.id);
 
                       // Return to original room if displaced
                       if (enemy.originalRoomId && enemy.currentRoomId !== enemy.originalRoomId) {
@@ -1277,14 +1396,14 @@ export class GameStateManager {
                   }
                 } else {
                   // Enemy is close to spawn - clear leash timer
-                  this.enemyLeashTimers.delete(enemy.id);
+                  state.tracking.enemyLeashTimers.delete(enemy.id);
                 }
               }
               continue;
             }
 
             // Enemy has a target - clear leash timer
-            this.enemyLeashTimers.delete(enemy.id);
+            state.tracking.enemyLeashTimers.delete(enemy.id);
 
             // Debug: log when enemy finds a player (occasionally)
             if (Math.random() < 0.02) {
@@ -1292,8 +1411,8 @@ export class GameStateManager {
             }
 
             // Track aggro time when enemy first spots a player
-            if (!this.enemyAggroTimes.has(enemy.id)) {
-              this.enemyAggroTimes.set(enemy.id, Date.now());
+            if (!state.tracking.enemyAggroTimes.has(enemy.id)) {
+              state.tracking.enemyAggroTimes.set(enemy.id, Date.now());
             }
 
             // Get attack range based on enemy type
@@ -1318,17 +1437,19 @@ export class GameStateManager {
                   enemy.position.x = newPos.x;
                   enemy.position.y = newPos.y;
                 }
-              } else if ((this.attackCooldowns.get(enemy.id) ?? 0) <= 0) {
+              } else if ((state.tracking.attackCooldowns.get(enemy.id) ?? 0) <= 0) {
                 // Check aggro delay - enemies can't attack for 1 second after first seeing a player
                 // If aggro time is not set, set it now (this ensures enemies always have an aggro time)
-                if (!this.enemyAggroTimes.has(enemy.id)) {
-                  this.enemyAggroTimes.set(enemy.id, Date.now());
+                if (!state.tracking.enemyAggroTimes.has(enemy.id)) {
+                  state.tracking.enemyAggroTimes.set(enemy.id, Date.now());
                   console.log(`[DEBUG] Enemy ${enemy.name} (${enemy.id}) aggro time set to NOW`);
                 }
-                const aggroTime = this.enemyAggroTimes.get(enemy.id)!;
+                const aggroTime = state.tracking.enemyAggroTimes.get(enemy.id)!;
                 const timeSinceAggro = (Date.now() - aggroTime) / 1000;
+                // BUG FIX: Ex-patrollers get reduced aggro delay (they're already alert)
+                const requiredDelay = enemy.wasPatrolling ? this.ENEMY_AGGRO_DELAY_PATROL : this.ENEMY_AGGRO_DELAY;
 
-                if (timeSinceAggro >= this.ENEMY_AGGRO_DELAY) {
+                if (timeSinceAggro >= requiredDelay) {
                   // Only attack if cooldown is ready, have LOS, and aggro delay has passed
                   console.log(`[DEBUG] Enemy ${enemy.name} (${enemy.id}) ATTACKING player ${nearestPlayer.name}, timeSinceAggro=${timeSinceAggro.toFixed(2)}s`);
                   const result = processEnemyAttack(enemy, nearestPlayer);
@@ -1336,7 +1457,7 @@ export class GameStateManager {
                     console.log(`[DEBUG] Enemy ${enemy.name} attack produced NO events! Player buffs: ${nearestPlayer.buffs.map(b => b.icon).join(', ')}`);
                   }
                   events.push(...result.events);
-                  this.attackCooldowns.set(enemy.id, this.ENEMY_ATTACK_COOLDOWN);
+                  state.tracking.attackCooldowns.set(enemy.id, this.ENEMY_ATTACK_COOLDOWN);
 
                   // Ranged/caster kiting behavior - back away after attacking if player is too close
                   if ((enemy.type === 'ranged' || enemy.type === 'caster') && nearestDist < 120) {
@@ -1417,8 +1538,8 @@ export class GameStateManager {
               }
 
               // Check if melee enemy should charge
-              const isCharging = this.enemyCharging.has(enemy.id);
-              const chargeCooldown = this.enemyChargeCooldowns.get(enemy.id) ?? 0;
+              const isCharging = state.tracking.enemyCharging.has(enemy.id);
+              const chargeCooldown = state.tracking.enemyChargeCooldowns.get(enemy.id) ?? 0;
               const shouldStartCharge =
                 enemy.type === 'melee' &&
                 !enemy.isBoss &&
@@ -1430,7 +1551,7 @@ export class GameStateManager {
 
               if (shouldStartCharge) {
                 // Start charging at nearest player
-                this.enemyCharging.set(enemy.id, {
+                state.tracking.enemyCharging.set(enemy.id, {
                   targetId: nearestPlayer.id,
                   startTime: Date.now()
                 });
@@ -1438,13 +1559,13 @@ export class GameStateManager {
 
               if (isCharging) {
                 // Charging - move fast toward target
-                const chargeData = this.enemyCharging.get(enemy.id)!;
+                const chargeData = state.tracking.enemyCharging.get(enemy.id)!;
                 const chargeTarget = state.players.find(p => p.id === chargeData.targetId);
 
                 if (!chargeTarget || !chargeTarget.isAlive) {
                   // Target gone - end charge
-                  this.enemyCharging.delete(enemy.id);
-                  this.enemyChargeCooldowns.set(enemy.id, this.CHARGE_COOLDOWN);
+                  state.tracking.enemyCharging.delete(enemy.id);
+                  state.tracking.enemyChargeCooldowns.set(enemy.id, this.CHARGE_COOLDOWN);
                 } else {
                   const newPos = this.moveWithObstacleAvoidance(
                     state, enemy.position, chargeTarget.position, this.CHARGE_SPEED, deltaTime
@@ -1461,8 +1582,8 @@ export class GameStateManager {
 
                   if (distToTarget <= this.MELEE_RANGE) {
                     // Charge impact - deal bonus damage
-                    this.enemyCharging.delete(enemy.id);
-                    this.enemyChargeCooldowns.set(enemy.id, this.CHARGE_COOLDOWN);
+                    state.tracking.enemyCharging.delete(enemy.id);
+                    state.tracking.enemyChargeCooldowns.set(enemy.id, this.CHARGE_COOLDOWN);
 
                     // Deal charge damage (bonus damage)
                     const isMagic = enemy.type === 'caster';
@@ -1487,13 +1608,13 @@ export class GameStateManager {
                     }
 
                     // Set attack cooldown
-                    this.attackCooldowns.set(enemy.id, this.ENEMY_ATTACK_COOLDOWN);
+                    state.tracking.attackCooldowns.set(enemy.id, this.ENEMY_ATTACK_COOLDOWN);
                   }
 
                   // Timeout charge after 3 seconds
                   if (Date.now() - chargeData.startTime > 3000) {
-                    this.enemyCharging.delete(enemy.id);
-                    this.enemyChargeCooldowns.set(enemy.id, this.CHARGE_COOLDOWN);
+                    state.tracking.enemyCharging.delete(enemy.id);
+                    state.tracking.enemyChargeCooldowns.set(enemy.id, this.CHARGE_COOLDOWN);
                   }
                 }
               } else {
@@ -1522,7 +1643,7 @@ export class GameStateManager {
 
               // Update charge cooldown
               if (chargeCooldown > 0) {
-                this.enemyChargeCooldowns.set(enemy.id, chargeCooldown - deltaTime);
+                state.tracking.enemyChargeCooldowns.set(enemy.id, chargeCooldown - deltaTime);
               }
             }
           }
@@ -1643,7 +1764,7 @@ export class GameStateManager {
 
           if (nearestEnemy && nearestEnemyDist <= petAttackRange) {
             // Pet attacks (skip line of sight for now - it was blocking attacks)
-            const petCd = this.attackCooldowns.get(pet.id) ?? 0;
+            const petCd = state.tracking.attackCooldowns.get(pet.id) ?? 0;
             if (petCd <= 0) {
               // Pet auto-attack
               const isMagic = pet.stats.spellPower > pet.stats.attackPower;
@@ -1677,7 +1798,7 @@ export class GameStateManager {
                 killed
               });
 
-              this.attackCooldowns.set(pet.id, 1.5); // Pet attacks every 1.5s
+              state.tracking.attackCooldowns.set(pet.id, 1.5); // Pet attacks every 1.5s
             }
           }
         }
@@ -1706,7 +1827,7 @@ export class GameStateManager {
             state.dungeon.bossDefeated = true;
 
             // Calculate boss kill time bonus (faster kill = better loot)
-            const bossStartTime = this.bossFightStartTimes.get(boss.id);
+            const bossStartTime = state.tracking.bossFightStartTimes.get(boss.id);
             let killTimeBonus = 0;
             if (bossStartTime) {
               const killTimeSeconds = (Date.now() - bossStartTime) / 1000;
@@ -1723,7 +1844,7 @@ export class GameStateManager {
               } else {
                 console.log(`[DEBUG] Boss killed in ${killTimeSeconds.toFixed(1)}s - no bonus`);
               }
-              this.bossFightStartTimes.delete(boss.id);
+              state.tracking.bossFightStartTimes.delete(boss.id);
             }
 
             const lootMap = generateBossLoot(runId, state.floor, boss.bossId, state.players, killTimeBonus);
@@ -1872,7 +1993,7 @@ export class GameStateManager {
           if (dist <= effect.radius) {
             // Check damage tick
             const tickKey = `${effect.id}_${player.id}`;
-            const lastTick = this.groundEffectDamageTicks.get(tickKey) ?? 0;
+            const lastTick = state.tracking.groundEffectDamageTicks.get(tickKey) ?? 0;
             const nowMs = Date.now();
 
             if (nowMs - lastTick >= effect.tickInterval * 1000) {
@@ -1895,7 +2016,7 @@ export class GameStateManager {
                 killed
               });
 
-              this.groundEffectDamageTicks.set(tickKey, nowMs);
+              state.tracking.groundEffectDamageTicks.set(tickKey, nowMs);
             }
           }
         }
@@ -1912,41 +2033,66 @@ export class GameStateManager {
         for (const enemy of room.enemies) {
           if (!enemy.isAlive) continue;
 
-          // Handle patrolling enemies
-          if (enemy.isPatrolling && enemy.patrolRoute && enemy.patrolRoute.length >= 2) {
-            const targetRoomId = enemy.patrolTargetRoomId ?? enemy.patrolRoute[1];
-            const targetRoom = state.dungeon.rooms.find(r => r.id === targetRoomId);
+          // Handle patrolling enemies - BUG FIX: Now follows corridor waypoints
+          if (enemy.isPatrolling && enemy.patrolWaypoints && enemy.patrolWaypoints.length >= 2) {
+            // Initialize waypoint index if not set
+            if (enemy.currentWaypointIndex === undefined) {
+              enemy.currentWaypointIndex = 0;
+            }
+            if (enemy.patrolDirection === undefined) {
+              enemy.patrolDirection = 1;
+            }
 
-            if (targetRoom) {
-              // Calculate target position (center of target room)
-              const targetX = targetRoom.x + targetRoom.width / 2;
-              const targetY = targetRoom.y + targetRoom.height / 2;
+            // Get current target waypoint
+            const targetWaypoint = enemy.patrolWaypoints[enemy.currentWaypointIndex];
+            if (!targetWaypoint) continue;
 
-              // Move toward target room
-              const dx = targetX - enemy.position.x;
-              const dy = targetY - enemy.position.y;
-              const dist = Math.sqrt(dx * dx + dy * dy);
+            // Move toward current waypoint (follows corridor path)
+            const dx = targetWaypoint.x - enemy.position.x;
+            const dy = targetWaypoint.y - enemy.position.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
 
-              if (dist > 30) { // Not at destination yet
-                const speed = 120; // Patrol speed (faster for visibility)
-                const moveX = (dx / dist) * speed * deltaTime;
-                const moveY = (dy / dist) * speed * deltaTime;
-                enemy.position.x += moveX;
-                enemy.position.y += moveY;
+            const speed = 120; // Patrol speed
+            const waypointThreshold = 20; // How close to waypoint before moving to next
+
+            if (dist > waypointThreshold) {
+              // Move toward waypoint
+              const moveX = (dx / dist) * speed * deltaTime;
+              const moveY = (dy / dist) * speed * deltaTime;
+              enemy.position.x += moveX;
+              enemy.position.y += moveY;
+            } else {
+              // Reached waypoint - move to next one
+              const nextIndex = enemy.currentWaypointIndex + enemy.patrolDirection;
+
+              if (nextIndex >= enemy.patrolWaypoints.length) {
+                // Reached end, reverse direction
+                enemy.patrolDirection = -1;
+                enemy.currentWaypointIndex = enemy.patrolWaypoints.length - 2;
+              } else if (nextIndex < 0) {
+                // Reached start, reverse direction
+                enemy.patrolDirection = 1;
+                enemy.currentWaypointIndex = 1;
               } else {
-                // Reached target room - switch direction
-                enemy.currentRoomId = targetRoomId;
-                const currentIndex = enemy.patrolRoute.indexOf(targetRoomId);
-                const nextIndex = (currentIndex + 1) % enemy.patrolRoute.length;
-                enemy.patrolTargetRoomId = enemy.patrolRoute[nextIndex];
+                enemy.currentWaypointIndex = nextIndex;
+              }
 
-                // Move enemy to new room's enemy list
-                const newRoom = state.dungeon.rooms.find(r => r.id === targetRoomId);
-                if (newRoom && newRoom !== room) {
-                  // Remove from current room
-                  room.enemies = room.enemies.filter(e => e.id !== enemy.id);
-                  // Add to new room
-                  newRoom.enemies.push(enemy);
+              // Update current room based on waypoint position
+              // Check which room the enemy is now in
+              for (const checkRoom of state.dungeon.rooms) {
+                if (
+                  enemy.position.x >= checkRoom.x &&
+                  enemy.position.x <= checkRoom.x + checkRoom.width &&
+                  enemy.position.y >= checkRoom.y &&
+                  enemy.position.y <= checkRoom.y + checkRoom.height
+                ) {
+                  if (checkRoom.id !== room.id) {
+                    // Move enemy to new room's enemy list
+                    room.enemies = room.enemies.filter(e => e.id !== enemy.id);
+                    checkRoom.enemies.push(enemy);
+                    enemy.currentRoomId = checkRoom.id;
+                  }
+                  break;
                 }
               }
             }
@@ -1965,10 +2111,10 @@ export class GameStateManager {
             }
 
             // Clear all combat state - player left the room
-            this.enemyAggroTimes.delete(enemy.id);
-            this.attackCooldowns.delete(enemy.id);
-            this.enemyCharging.delete(enemy.id);
-            this.enemyLeashTimers.delete(enemy.id);
+            state.tracking.enemyAggroTimes.delete(enemy.id);
+            state.tracking.attackCooldowns.delete(enemy.id);
+            state.tracking.enemyCharging.delete(enemy.id);
+            state.tracking.enemyLeashTimers.delete(enemy.id);
 
             // Get spawn position
             const spawnX = enemy.spawnPosition?.x ?? (room.x + room.width / 2);
@@ -2011,7 +2157,7 @@ export class GameStateManager {
       for (const player of state.players) {
         if (!player.isAlive) {
           // Track death time if not already tracked
-          if (!this.playerDeathTimes.has(player.id)) {
+          if (!state.tracking.playerDeathTimes.has(player.id)) {
             // Check for Soulstone buff - instant resurrection at same location
             const soulstoneBuffIndex = player.buffs.findIndex(b => b.icon === 'warlock_soulstone');
             if (soulstoneBuffIndex >= 0) {
@@ -2028,7 +2174,7 @@ export class GameStateManager {
               continue; // Skip normal death handling
             }
 
-            this.playerDeathTimes.set(player.id, Date.now());
+            state.tracking.playerDeathTimes.set(player.id, Date.now());
             player.targetId = null; // Clear target on death
 
             // Clear all enemy targetIds pointing to this dead player
@@ -2044,7 +2190,7 @@ export class GameStateManager {
           }
 
           // Check if respawn delay has passed
-          const deathTime = this.playerDeathTimes.get(player.id)!;
+          const deathTime = state.tracking.playerDeathTimes.get(player.id)!;
           const timeSinceDeath = Date.now() - deathTime;
 
           if (timeSinceDeath >= this.RESPAWN_DELAY) {
@@ -2054,7 +2200,7 @@ export class GameStateManager {
             player.stats.mana = player.stats.maxMana;
             player.position = getPlayerSpawnPosition(state.dungeon, state.players.indexOf(player));
             player.targetId = null; // Clear target on respawn
-            this.playerDeathTimes.delete(player.id);
+            state.tracking.playerDeathTimes.delete(player.id);
 
             // Update currentRoomId to start room (where player spawns)
             const startRoom = state.dungeon.rooms.find(r => r.type === 'start');
@@ -2063,10 +2209,10 @@ export class GameStateManager {
             }
 
             // Reset all enemy aggro times so they have a delay before attacking respawned player
-            this.enemyAggroTimes.clear();
+            state.tracking.enemyAggroTimes.clear();
 
             // Reset boss AoE cooldowns so they don't immediately cast on respawned player
-            this.bossAoECooldowns.clear();
+            state.tracking.bossAoECooldowns.clear();
 
             // Return any enemies that followed players back to their original rooms
             // currentRoomId tracks where they moved TO, so if it's set and different from
@@ -2318,7 +2464,7 @@ export class GameStateManager {
    */
   private handleEnemyDeath(state: RunState, enemy: Enemy, killer: Player): void {
     // Clear aggro time for dead enemy
-    this.enemyAggroTimes.delete(enemy.id);
+    state.tracking.enemyAggroTimes.delete(enemy.id);
 
     // Award XP to killer
     const xpAmount = getEnemyXP(state.floor, enemy.isBoss, enemy.isRare);
@@ -2653,7 +2799,7 @@ export class GameStateManager {
     if (!state.dungeon.bossDefeated) return null;
 
     // Clear all aggro times for new floor
-    this.enemyAggroTimes.clear();
+    state.tracking.enemyAggroTimes.clear();
 
     // Increment floor
     state.floor++;
@@ -3166,6 +3312,34 @@ export class GameStateManager {
   }
 
   /**
+   * Remove room modifier buffs/debuffs when player leaves a modified room
+   */
+  private removeRoomModifierBuffs(state: RunState, player: Player, modifier: import('@dungeon-link/shared').RoomModifier): void {
+    if (modifier === 'cursed') {
+      // Remove curse debuff and restore stats
+      const curseIndex = player.buffs.findIndex(b => b.id === 'room_curse');
+      if (curseIndex >= 0) {
+        player.buffs.splice(curseIndex, 1);
+        // Restore stats (recalculate from base + equipment)
+        player.stats.armor += 10;
+        player.stats.resist += 5;
+        console.log(`[MODIFIER] Removed curse debuff from ${player.name}`);
+      }
+    } else if (modifier === 'blessed') {
+      // Remove bless buff
+      const blessIndex = player.buffs.findIndex(b => b.id === 'room_bless');
+      if (blessIndex >= 0) {
+        player.buffs.splice(blessIndex, 1);
+        // Remove stat boost
+        player.stats.armor -= 10;
+        player.stats.crit -= 5;
+        console.log(`[MODIFIER] Removed blessed buff from ${player.name}`);
+      }
+    }
+    // 'burning' and 'dark' don't have persistent buffs to remove
+  }
+
+  /**
    * Auto-target the closest enemy when entering a new room
    */
   private autoTargetClosestEnemy(state: RunState, player: Player, room: import('@dungeon-link/shared').Room): void {
@@ -3179,6 +3353,7 @@ export class GameStateManager {
 
     for (const enemy of room.enemies) {
       if (!enemy.isAlive) continue;
+      if (enemy.isHidden) continue; // Skip hidden enemies (ambush rooms)
 
       const dx = enemy.position.x - player.position.x;
       const dy = enemy.position.y - player.position.y;
@@ -3219,7 +3394,7 @@ export class GameStateManager {
       // Exclude stealthed players (vanish or stealth)
       if (p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth')) return false;
       // Check if boss has aggro (has been in combat)
-      const aggroTime = this.enemyAggroTimes.get(boss.id);
+      const aggroTime = state.tracking.enemyAggroTimes.get(boss.id);
       if (!aggroTime) return false; // Boss hasn't aggroed yet
       return (now - aggroTime) >= this.ENEMY_AGGRO_DELAY * 1000;
     });

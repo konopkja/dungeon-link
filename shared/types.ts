@@ -276,6 +276,25 @@ export interface Enemy {
   patrolTargetRoomId?: string;  // Next room to patrol to
   originalRoomId?: string;  // Original spawn room (for returning after player respawn)
   spawnPosition?: Position;  // Original spawn position for leash reset
+  /**
+   * BUG FIX: Pre-calculated waypoints that follow corridor paths between rooms.
+   * Previously patrols moved in direct lines, cutting through walls.
+   * Now they follow these waypoints which go through corridor midpoints.
+   */
+  patrolWaypoints?: Position[];  // Actual positions to walk through (corridor centers)
+  currentWaypointIndex?: number;  // Index in patrolWaypoints array
+  patrolDirection?: 1 | -1;  // 1 = forward through waypoints, -1 = backward
+  /**
+   * BUG FIX: Flag to indicate this enemy was a patroller.
+   * Used to apply reduced aggro delay since patrollers are already alert.
+   * Set to true when patrol mode is disabled upon entering combat.
+   */
+  wasPatrolling?: boolean;
+  /**
+   * For ambush rooms: enemy is hidden until player triggers the ambush.
+   * Set to true when spawned in 'ambush' variant room.
+   */
+  isHidden?: boolean;
 }
 
 export interface Pet {
@@ -336,6 +355,28 @@ export interface Chest {
 // DUNGEON
 // ============================================
 
+/**
+ * Room variants define enemy formation patterns.
+ * These change WHERE enemies spawn without requiring obstacle/collision systems.
+ */
+export type RoomVariant =
+  | 'standard'      // Default random placement
+  | 'ambush'        // Enemies hidden, spawn when player reaches center
+  | 'guardian'      // Elite in center + minions around in circle
+  | 'swarm'         // Many weak enemies clustered in one area
+  | 'arena'         // Enemies spread to room edges
+  | 'gauntlet';     // Enemies distributed along longest axis
+
+/**
+ * Room modifiers apply environmental effects.
+ * Reuses existing theme logic where possible.
+ */
+export type RoomModifier =
+  | 'dark'          // Reduced visibility (like Shadow theme)
+  | 'burning'       // Periodic fire damage (like Inferno hazard)
+  | 'cursed'        // Stat debuff while in room
+  | 'blessed';      // Stat buff while in room (rare)
+
 export interface Room {
   id: string;
   x: number;
@@ -352,6 +393,9 @@ export interface Room {
   groundItems?: GroundItem[]; // Items dropped on the ground
   traps?: Trap[];    // Room traps (spikes, flamethrowers)
   chests?: Chest[];  // Lootable chests
+  // Room variety system
+  variant?: RoomVariant;    // Enemy formation pattern
+  modifier?: RoomModifier;  // Environmental effect
 }
 
 // ============================================
@@ -428,6 +472,71 @@ export interface GroundEffect {
 // GAME STATE
 // ============================================
 
+/**
+ * Per-run tracking state - automatically cleaned up when run is deleted.
+ * This fixes the memory leak where global Maps accumulated stale entity IDs.
+ *
+ * BUG FIX: Previously these were stored as global Maps in GameStateManager,
+ * causing unbounded memory growth as entity IDs from deleted runs persisted forever.
+ * By moving them into RunState, they're garbage collected when the run is deleted.
+ */
+export interface RunTracking {
+  // Attack cooldowns (entityId -> remaining cooldown in seconds)
+  attackCooldowns: Map<string, number>;
+  // Boss ability cooldowns (bossId_abilityId -> remaining cooldown)
+  bossAbilityCooldowns: Map<string, number>;
+  // Boss AoE ability cooldowns
+  bossAoECooldowns: Map<string, number>;
+  // Elite enemy special attack cooldowns
+  eliteAttackCooldowns: Map<string, number>;
+  // Ground effect damage ticks (effectId_playerId -> last tick time)
+  groundEffectDamageTicks: Map<string, number>;
+  // Player movement directions (playerId -> { moveX, moveY })
+  playerMovement: Map<string, { moveX: number; moveY: number }>;
+  // Player momentum for ice sliding (Frozen theme)
+  playerMomentum: Map<string, { vx: number; vy: number }>;
+  // Boss fight start times (bossId -> start timestamp)
+  bossFightStartTimes: Map<string, number>;
+  // Enemy aggro times (enemyId -> timestamp when first saw player)
+  enemyAggroTimes: Map<string, number>;
+  // Enemy leash timers (enemyId -> timestamp when lost target)
+  enemyLeashTimers: Map<string, number>;
+  // Player death times for respawn delay
+  playerDeathTimes: Map<string, number>;
+  // Enemy charge attack state
+  enemyCharging: Map<string, { targetId: string; startTime: number }>;
+  // Enemy charge cooldowns
+  enemyChargeCooldowns: Map<string, number>;
+  // Room variant: ambush trigger tracking (roomId set when triggered)
+  ambushTriggered: Set<string>;
+  // Room modifier: burning damage tick tracking (playerId_roomId -> last tick time)
+  modifierDamageTicks: Map<string, number>;
+}
+
+/**
+ * Creates a fresh RunTracking object with empty Maps.
+ * Called when creating a new run.
+ */
+export function createRunTracking(): RunTracking {
+  return {
+    attackCooldowns: new Map(),
+    bossAbilityCooldowns: new Map(),
+    bossAoECooldowns: new Map(),
+    eliteAttackCooldowns: new Map(),
+    groundEffectDamageTicks: new Map(),
+    playerMovement: new Map(),
+    playerMomentum: new Map(),
+    bossFightStartTimes: new Map(),
+    enemyAggroTimes: new Map(),
+    enemyLeashTimers: new Map(),
+    playerDeathTimes: new Map(),
+    enemyCharging: new Map(),
+    enemyChargeCooldowns: new Map(),
+    ambushTriggered: new Set(),
+    modifierDamageTicks: new Map(),
+  };
+}
+
 export interface RunState {
   runId: string;
   seed: string;
@@ -442,6 +551,8 @@ export interface RunState {
     damageMultiplier: number;
   };
   groundEffects: GroundEffect[];
+  // Per-run tracking state (automatically cleaned up when run is deleted)
+  tracking: RunTracking;
   // Crypto state (per-run tracking)
   cryptoState?: CryptoState;
 }

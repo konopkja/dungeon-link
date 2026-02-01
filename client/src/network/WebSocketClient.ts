@@ -170,12 +170,7 @@ export class WebSocketClient {
     this.send({ type: 'CREATE_RUN', playerName, classId });
   }
 
-  /**
-   * Join an existing run
-   */
-  joinRun(runId: string, playerName: string, classId: ClassName): void {
-    this.send({ type: 'JOIN_RUN', runId, playerName, classId });
-  }
+  // NOTE: joinRun removed - game is now single-player only
 
   /**
    * Send player input
@@ -286,14 +281,7 @@ export class WebSocketClient {
     return this.currentState.players.find(p => p.id === this.playerId) ?? null;
   }
 
-  /**
-   * Get invite link for current run
-   */
-  getInviteLink(): string {
-    if (!this.runId) return '';
-    const baseUrl = window.location.origin + window.location.pathname;
-    return `${baseUrl}?run=${this.runId}`;
-  }
+  // NOTE: getInviteLink removed - game is now single-player only
 
   /**
    * Save current character to a slot

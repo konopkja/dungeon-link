@@ -373,13 +373,11 @@ export class BootScene extends Phaser.Scene {
       await wsClient.connect();
       this.statusText?.setText('Connected!');
 
-      // Check for run ID in URL
-      const urlParams = new URLSearchParams(window.location.search);
-      const runId = urlParams.get('run');
+      // NOTE: URL join parameter removed - game is now single-player only
 
       // Short delay then go to menu
       this.time.delayedCall(500, () => {
-        this.scene.start('MenuScene', { joinRunId: runId });
+        this.scene.start('MenuScene', {});
         this.scene.stop('BootScene');
       });
     } catch (error) {

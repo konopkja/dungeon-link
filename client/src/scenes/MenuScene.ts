@@ -5,7 +5,7 @@ import { shouldLoadSave, getSaveSlotToLoad } from '../main';
 import { FONTS, COLORS } from '../ui/theme';
 
 interface MenuSceneData {
-  joinRunId?: string | null;
+  // NOTE: joinRunId removed - game is now single-player only
 }
 
 // Class data for display
@@ -106,7 +106,7 @@ const AVAILABLE_CLASSES: ClassName[] = [
 export class MenuScene extends Phaser.Scene {
   private selectedClass: ClassName = ClassName.Warrior;
   private playerName: string = '';
-  private joinRunId: string | null = null;
+  // NOTE: joinRunId removed - game is now single-player only
   private messageUnsubscribe: (() => void) | null = null;
   private menuOverlay: HTMLElement | null = null;
   private classButtons: Map<ClassName, HTMLElement> = new Map();
@@ -121,7 +121,7 @@ export class MenuScene extends Phaser.Scene {
   init(data: MenuSceneData): void {
     console.log('[MENU] init() called, data:', data);
     console.log('[MENU] Active scenes:', this.scene.manager.getScenes(true).map(s => s.scene.key));
-    this.joinRunId = data?.joinRunId ?? null;
+    // NOTE: joinRunId removed - game is now single-player only
 
     // Reset game start flag for fresh entry
     this.isStartingGame = false;
@@ -208,16 +208,16 @@ export class MenuScene extends Phaser.Scene {
       nameInput.addEventListener('input', this.nameInputHandler);
     }
 
-    // Set up join info
+    // NOTE: Join info removed - game is now single-player only
     const joinInfo = document.getElementById('menu-join-info');
     if (joinInfo) {
-      joinInfo.textContent = this.joinRunId ? `Joining party: ${this.joinRunId}` : '';
+      joinInfo.textContent = '';
     }
 
     // Set up start button - remove old listener first to prevent duplicates
     const startBtn = document.getElementById('menu-start-btn');
     if (startBtn) {
-      startBtn.textContent = this.joinRunId ? 'JOIN DUNGEON' : 'BEGIN DESCENT';
+      startBtn.textContent = 'BEGIN DESCENT';
       // Remove old listener if exists
       if (this.startBtnHandler) {
         startBtn.removeEventListener('click', this.startBtnHandler);
@@ -514,11 +514,8 @@ export class MenuScene extends Phaser.Scene {
 
     console.log('[MENU] Starting game with class:', this.selectedClass);
 
-    if (this.joinRunId) {
-      wsClient.joinRun(this.joinRunId, this.playerName, this.selectedClass);
-    } else {
-      wsClient.createRun(this.playerName, this.selectedClass);
-    }
+    // NOTE: joinRun removed - game is now single-player only
+    wsClient.createRun(this.playerName, this.selectedClass);
   }
 
   private loadSavedCharacter(saveData: SaveData, slot: number): void {

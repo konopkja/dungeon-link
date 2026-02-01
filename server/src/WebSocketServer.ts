@@ -90,18 +90,9 @@ export class GameWebSocketServer {
       if (client.playerId) {
         gameStateManager.removePlayer(client.playerId);
 
-        // Notify other players in the run
+        // Clean up crypto state (single-player: always cleanup on disconnect)
         if (client.runId) {
-          this.broadcastToRun(client.runId, {
-            type: 'PLAYER_LEFT',
-            playerId: client.playerId
-          }, client.ws);
-
-          // Clean up crypto state if this was the last player
-          const runPlayers = Array.from(this.clients.values()).filter(c => c.runId === client.runId && c !== client);
-          if (runPlayers.length === 0) {
-            cleanupCryptoState(client.runId);
-          }
+          cleanupCryptoState(client.runId);
         }
       }
       this.clients.delete(ws);
@@ -154,37 +145,7 @@ export class GameWebSocketServer {
         break;
       }
 
-      case 'JOIN_RUN': {
-        const result = gameStateManager.joinRun(message.runId, message.playerName, message.classId);
-
-        if (!result) {
-          this.send(client.ws, {
-            type: 'JOIN_ERROR',
-            message: 'Run not found or full'
-          });
-          return;
-        }
-
-        client.playerId = result.playerId;
-        client.runId = message.runId;
-
-        // Send join confirmation to new player
-        this.send(client.ws, {
-          type: 'RUN_JOINED',
-          playerId: result.playerId,
-          state: result.state
-        });
-
-        // Notify existing players
-        const newPlayer = result.state.players.find(p => p.id === result.playerId);
-        if (newPlayer) {
-          this.broadcastToRun(message.runId, {
-            type: 'PLAYER_JOINED',
-            player: newPlayer
-          }, client.ws);
-        }
-        break;
-      }
+      // NOTE: JOIN_RUN removed - game is now single-player only
 
       case 'PLAYER_INPUT': {
         if (!client.playerId) return;
