@@ -12,6 +12,26 @@ interface RoomConnection {
 }
 
 /**
+ * Get enemy count range based on floor number.
+ * Floors 1-2 have reduced enemy counts for better early game balance.
+ * - Floor 1: 1-2 enemies per room
+ * - Floor 2: 1-3 enemies per room
+ * - Floor 3+: Normal range (ENEMIES_PER_ROOM_MIN to ENEMIES_PER_ROOM_MAX)
+ */
+function getEnemyCountRange(floor: number): { min: number; max: number } {
+  if (floor === 1) {
+    return { min: 1, max: 2 };
+  } else if (floor === 2) {
+    return { min: 1, max: 3 };
+  } else {
+    return {
+      min: GAME_CONFIG.ENEMIES_PER_ROOM_MIN,
+      max: GAME_CONFIG.ENEMIES_PER_ROOM_MAX
+    };
+  }
+}
+
+/**
  * Generate a procedural dungeon floor
  */
 export function generateDungeon(
@@ -544,9 +564,10 @@ function populateRooms(
       }];
     } else if (room.type === 'rare') {
       // Rare mob room - normal enemies plus one rare
+      const enemyRange = getEnemyCountRange(floor);
       const numEnemies = rng.nextInt(
-        GAME_CONFIG.ENEMIES_PER_ROOM_MIN,
-        GAME_CONFIG.ENEMIES_PER_ROOM_MAX - 1
+        enemyRange.min,
+        Math.max(enemyRange.min, enemyRange.max - 1) // Leave room for rare mob
       );
 
       room.enemies = generateEnemyPack(rng, room, floor, numEnemies, availableEnemies, partySize, averageItemPower);
@@ -584,11 +605,9 @@ function populateRooms(
         debuffs: []
       });
     } else {
-      // Normal room
-      const numEnemies = rng.nextInt(
-        GAME_CONFIG.ENEMIES_PER_ROOM_MIN,
-        GAME_CONFIG.ENEMIES_PER_ROOM_MAX
-      );
+      // Normal room - use floor-dependent enemy counts for early game balance
+      const enemyRange = getEnemyCountRange(floor);
+      const numEnemies = rng.nextInt(enemyRange.min, enemyRange.max);
 
       room.enemies = generateEnemyPack(rng, room, floor, numEnemies, availableEnemies, partySize, averageItemPower);
 
