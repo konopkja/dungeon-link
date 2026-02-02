@@ -1521,14 +1521,21 @@ export class GameStateManager {
             const attackRange = enemy.type === 'melee' ? this.MELEE_RANGE : this.RANGED_RANGE;
 
             if (nearestDist <= attackRange) {
-              // Skip LOS check for enemies in the same room as the player
-              // The player is already verified to be in currentRoom (via inCurrentRoom check above)
-              // and this enemy is from currentRoom.enemies, so they're in the same room
-              // Rooms are open spaces with no internal walls, so LOS is always clear
-              const sameRoom = true; // Enemy and player are confirmed in same room by the targeting logic
-              const skipLOSCheck = sameRoom || nearestDist <= this.MELEE_RANGE;
+              // Check if player is actually INSIDE the room (not just in padding zone)
+              // The padding allows targeting players in corridors, but casters shouldn't shoot through walls
+              const playerInRoom =
+                nearestPlayer.position.x >= currentRoom.x &&
+                nearestPlayer.position.x <= currentRoom.x + currentRoom.width &&
+                nearestPlayer.position.y >= currentRoom.y &&
+                nearestPlayer.position.y <= currentRoom.y + currentRoom.height;
 
-              // Check line of sight before attacking (skip for same-room or close-range)
+              // Skip LOS check if:
+              // 1. Player is at melee range (close enough that walls don't matter)
+              // 2. Player is actually inside the room (rooms are open spaces, no internal walls)
+              // Require LOS check if player is in the corridor/padding zone (could be behind a wall)
+              const skipLOSCheck = nearestDist <= this.MELEE_RANGE || playerInRoom;
+
+              // Check line of sight before attacking (required for ranged/casters if player outside room)
               if (!skipLOSCheck && !this.hasLineOfSight(state, enemy.position, nearestPlayer.position)) {
                 // No clear path, try to move closer with obstacle avoidance
                 const moveSpeed = 60 * slowFactor;
