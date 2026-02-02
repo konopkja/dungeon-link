@@ -266,19 +266,19 @@ export const CLASSES: ClassDefinition[] = [
         cooldown: 0, manaCost: 15, baseDamage: 30, range: 350, isBaseline: true
       },
       {
-        id: 'mage_frostbolt', name: 'Frostbolt', description: 'Launch a bolt of frost, slowing the target.',
-        classId: ClassName.Mage, type: AbilityType.Damage, targetType: TargetType.Enemy,
-        cooldown: 0, manaCost: 12, baseDamage: 22, range: 350, isBaseline: true
+        id: 'mage_meditation', name: 'Meditation', description: 'Enter a meditative state to quickly restore 50% of max mana. Mana restored increases with rank.',
+        classId: ClassName.Mage, type: AbilityType.Buff, targetType: TargetType.Self,
+        cooldown: 120, manaCost: 0, range: 0, isBaseline: true
       },
       {
-        id: 'mage_blizzard', name: 'Blizzard', description: 'Call down a blizzard on an area.',
-        classId: ClassName.Mage, type: AbilityType.Damage, targetType: TargetType.Ground,
-        cooldown: 12, manaCost: 40, baseDamage: 15, range: 350, isBaseline: false
+        id: 'mage_blaze', name: 'Blaze', description: 'Fire that bounces between enemies, hitting up to 5 targets. Damage increases with rank.',
+        classId: ClassName.Mage, type: AbilityType.Damage, targetType: TargetType.Enemy,
+        cooldown: 60, manaCost: 10, baseDamage: 25, range: 350, isBaseline: false
       },
       {
-        id: 'mage_pyroblast', name: 'Pyroblast', description: 'Massive fireball dealing huge damage.',
+        id: 'mage_pyroblast', name: 'Pyroblast', description: 'Massive fireball that stuns the target for 3 seconds.',
         classId: ClassName.Mage, type: AbilityType.Damage, targetType: TargetType.Enemy,
-        cooldown: 15, manaCost: 45, baseDamage: 60, range: 350, isBaseline: false
+        cooldown: 15, manaCost: 10, baseDamage: 60, range: 350, isBaseline: false
       },
       {
         id: 'mage_iceblock', name: 'Ice Block', description: 'Encase yourself in ice, becoming immune.',

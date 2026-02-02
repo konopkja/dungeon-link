@@ -630,6 +630,7 @@ export interface CombatEvent {
   abilityId?: string;
   damage?: number;
   heal?: number;
+  manaRestore?: number; // For Meditation and similar mana restore effects
   isCrit?: boolean;
   isStealthAttack?: boolean;
   killed?: boolean;

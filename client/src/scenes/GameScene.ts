@@ -563,17 +563,38 @@ export class GameScene extends Phaser.Scene {
     // Build description with stat modifiers
     const lines: string[] = [typeIndicator];
 
-    if (buff.statModifiers) {
+    // Floor theme buff descriptions
+    const floorThemeDescriptions: Record<string, string> = {
+      'floor_inferno': 'The burning floor deals\nperiodic fire damage.',
+      'floor_frozen': 'Icy ground causes you\nto slide while moving.',
+      'floor_swamp': 'Toxic fumes fill the air.\nWatch your step.',
+      'floor_shadow': 'Darkness limits your\nvisibility in rooms.',
+      'floor_treasure': 'A vault full of riches!\nMore traps, better loot.'
+    };
+
+    // Room modifier buff descriptions
+    const roomModifierDescriptions: Record<string, string> = {
+      'room_curse': 'Cursed ground reduces\nyour armor and resist.',
+      'room_bless': 'Blessed ground increases\nyour armor and crit.',
+      'room_burning': 'Standing here deals\nperiodic fire damage.'
+    };
+
+    // Check for custom descriptions first
+    if (floorThemeDescriptions[buff.id]) {
+      lines.push(floorThemeDescriptions[buff.id]);
+    } else if (roomModifierDescriptions[buff.id]) {
+      lines.push(roomModifierDescriptions[buff.id]);
+    } else if (buff.statModifiers) {
       const mods = buff.statModifiers;
       if (mods.health) lines.push(`+${mods.health} Health`);
       if (mods.mana) lines.push(`+${mods.mana} Mana`);
       if (mods.attackPower) lines.push(`+${mods.attackPower} Attack Power`);
       if (mods.spellPower) lines.push(`+${mods.spellPower} Spell Power`);
-      if (mods.armor) lines.push(`+${mods.armor} Armor`);
-      if (mods.crit) lines.push(`+${mods.crit}% Crit`);
+      if (mods.armor) lines.push(`${mods.armor > 0 ? '+' : ''}${mods.armor} Armor`);
+      if (mods.crit) lines.push(`${mods.crit > 0 ? '+' : ''}${mods.crit}% Crit`);
       if (mods.haste) lines.push(`+${mods.haste}% Haste`);
       if (mods.lifesteal) lines.push(`+${mods.lifesteal}% Lifesteal`);
-      if (mods.resist) lines.push(`+${mods.resist} Resist`);
+      if (mods.resist) lines.push(`${mods.resist > 0 ? '+' : ''}${mods.resist} Resist`);
     }
 
     // Duration info
@@ -1389,11 +1410,36 @@ export class GameScene extends Phaser.Scene {
 
     let description = ability.description;
 
+    // Dynamic descriptions for abilities that scale with rank
+    if (abilityId === 'mage_meditation') {
+      // 50% base + 5% per rank (50/55/60/65/70% at ranks 1-5)
+      const manaPercent = 50 + (rank - 1) * 5;
+      description = `Enter a meditative state to quickly restore ${manaPercent}% of max mana.`;
+    } else if (abilityId === 'mage_blaze') {
+      // 15% damage increase per rank
+      const damageBonus = (rank - 1) * 15;
+      description = `Fire that bounces between enemies, hitting up to 5 targets.${damageBonus > 0 ? ` +${damageBonus}% damage.` : ''}`;
+    } else if (abilityId === 'rogue_vanish') {
+      const duration = 4 + rank;
+      description = `Vanish from sight for ${duration}s, dropping all threat. Next attack deals +50% damage.`;
+    } else if (abilityId === 'rogue_stealth') {
+      const duration = 8 + rank * 2;
+      description = `Enter stealth for ${duration}s. Next Sinister Strike deals double damage.`;
+    } else if (abilityId === 'shaman_ancestral') {
+      const charges = 2 + rank;
+      const duration = 6 + rank * 2;
+      description = `Ancestral spirits protect you for ${duration}s. Heals when hit (${charges} charges).`;
+    } else if (abilityId === 'warrior_bloodlust') {
+      const healPercent = 15 + rank * 5;
+      const duration = 8 + rank * 2;
+      description = `Enter a bloodthirsty rage for ${duration}s. Heal ${healPercent}% of damage dealt.`;
+    }
+
     // Add damage/heal info if player stats are available
     if (player) {
       const { attackPower, spellPower } = player.stats;
 
-      if (ability.baseDamage) {
+      if (ability.baseDamage && abilityId !== 'mage_blaze') {
         const dmg = calculateAbilityDamage(ability.baseDamage, rank, attackPower, spellPower);
         description += `\nDamage: ${dmg.min}-${dmg.max}`;
       }
@@ -5498,8 +5544,28 @@ export class GameScene extends Phaser.Scene {
       }
 
       // Spawn heal effect
-      if (event.heal) {
+      if (event.heal && event.abilityId !== 'mage_meditation') {
         this.spawnHealEffect(targetPos.x, targetPos.y);
+      }
+
+      // Spawn Meditation effect (blue mana restore) and play potion sound
+      if (event.abilityId === 'mage_meditation' && (event as any).manaRestore) {
+        this.spawnMeditationEffect(targetPos.x, targetPos.y);
+        this.playSfx('sfxHealSpell'); // Same sound as mana potion
+      }
+
+      // Spawn Pyroblast stun effect
+      if (event.abilityId === 'mage_pyroblast' && event.damage && targetPos.x !== 0) {
+        this.spawnStunEffect(targetPos.x, targetPos.y);
+      }
+
+      // Spawn Blaze chain effect (fire bolt between targets)
+      if (event.abilityId === 'mage_blaze' && event.damage && sourcePos.x !== 0 && targetPos.x !== 0) {
+        // Check if this is a bounce (sourceId is an enemy, not the player)
+        const player = wsClient.getCurrentPlayer();
+        if (player && event.sourceId !== player.id) {
+          this.spawnBlazeChainEffect(sourcePos.x, sourcePos.y, targetPos.x, targetPos.y);
+        }
       }
 
       // Spawn Drain Life effect (green beam from enemy to caster)
@@ -6335,7 +6401,7 @@ export class GameScene extends Phaser.Scene {
     if (!abilityId) return { primary: 0xccaa44, secondary: 0xffdd88, size: 6 };
 
     // Fire spells - orange/red
-    if (abilityId.includes('fire') || abilityId.includes('flame') || abilityId.includes('inferno')) {
+    if (abilityId.includes('fire') || abilityId.includes('flame') || abilityId.includes('inferno') || abilityId.includes('blaze') || abilityId.includes('pyro')) {
       return { primary: 0xff4400, secondary: 0xffaa00, size: 7 };
     }
     // Frost/ice spells - blue/cyan
@@ -6774,6 +6840,181 @@ export class GameScene extends Phaser.Scene {
       duration: 250,
       ease: 'Cubic.easeOut',
       onComplete: () => graphics.destroy()
+    });
+  }
+
+  private spawnMeditationEffect(x: number, y: number): void {
+    // Rising blue particles (like heal but blue)
+    for (let i = 0; i < 12; i++) {
+      const particle = this.add.circle(
+        x + (Math.random() - 0.5) * 40,
+        y + 10,
+        4, 0x4488ff, 0.9
+      ).setDepth(51);
+
+      this.tweens.add({
+        targets: particle,
+        y: y - 50,
+        alpha: 0,
+        duration: 800 + Math.random() * 300,
+        delay: i * 60,
+        ease: 'Cubic.easeOut',
+        onComplete: () => particle.destroy()
+      });
+    }
+
+    // Central blue glow
+    const glow = this.add.circle(x, y, 20, 0x4488ff, 0.5).setDepth(50);
+    this.tweens.add({
+      targets: glow,
+      radius: 40,
+      alpha: 0,
+      duration: 600,
+      ease: 'Cubic.easeOut',
+      onComplete: () => glow.destroy()
+    });
+
+    // Spiraling mana wisps
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const wisp = this.add.circle(
+        x + Math.cos(angle) * 20,
+        y + Math.sin(angle) * 20,
+        3, 0x88ccff, 1.0
+      ).setDepth(52);
+
+      this.tweens.add({
+        targets: wisp,
+        x: x,
+        y: y - 30,
+        alpha: 0,
+        duration: 500,
+        delay: i * 100,
+        ease: 'Quad.easeIn',
+        onComplete: () => wisp.destroy()
+      });
+    }
+  }
+
+  private spawnStunEffect(x: number, y: number): void {
+    // Circling stars around stunned enemy
+    const starCount = 5;
+    const radius = 25;
+
+    for (let i = 0; i < starCount; i++) {
+      const angle = (i / starCount) * Math.PI * 2;
+      const star = this.add.text(
+        x + Math.cos(angle) * radius,
+        y - 20 + Math.sin(angle) * 10,
+        '✦',
+        { fontSize: '14px', color: '#ffff00' }
+      ).setOrigin(0.5).setDepth(52);
+
+      // Rotate around the enemy
+      this.tweens.add({
+        targets: star,
+        angle: 360,
+        duration: 2000,
+        repeat: 1,
+        onUpdate: () => {
+          const currentAngle = angle + (star.angle * Math.PI / 180);
+          star.x = x + Math.cos(currentAngle) * radius;
+          star.y = y - 20 + Math.sin(currentAngle) * 10;
+        },
+        onComplete: () => star.destroy()
+      });
+    }
+
+    // Impact burst
+    const burst = this.add.circle(x, y, 10, 0xffff00, 0.6).setDepth(51);
+    this.tweens.add({
+      targets: burst,
+      radius: 30,
+      alpha: 0,
+      duration: 300,
+      ease: 'Cubic.easeOut',
+      onComplete: () => burst.destroy()
+    });
+  }
+
+  private spawnBlazeChainEffect(fromX: number, fromY: number, toX: number, toY: number): void {
+    this.drawFireBolt(fromX, fromY, toX, toY);
+  }
+
+  private drawFireBolt(fromX: number, fromY: number, toX: number, toY: number): void {
+    const graphics = this.add.graphics().setDepth(51);
+
+    // Calculate direction and distance
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const segments = Math.max(3, Math.floor(dist / 25));
+
+    // Generate slightly wavy fire path
+    const points: { x: number; y: number }[] = [{ x: fromX, y: fromY }];
+
+    for (let i = 1; i < segments; i++) {
+      const t = i / segments;
+      const baseX = fromX + dx * t;
+      const baseY = fromY + dy * t;
+
+      // Add perpendicular jitter for wavy effect
+      const perpX = -dy / dist;
+      const perpY = dx / dist;
+      const jitter = (Math.random() - 0.5) * 12;
+
+      points.push({
+        x: baseX + perpX * jitter,
+        y: baseY + perpY * jitter
+      });
+    }
+    points.push({ x: toX, y: toY });
+
+    // Draw outer glow (orange)
+    graphics.lineStyle(10, 0xff6600, 0.4);
+    graphics.beginPath();
+    graphics.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      graphics.lineTo(points[i].x, points[i].y);
+    }
+    graphics.strokePath();
+
+    // Draw main fire (bright orange/yellow)
+    graphics.lineStyle(5, 0xff8800, 1.0);
+    graphics.beginPath();
+    graphics.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      graphics.lineTo(points[i].x, points[i].y);
+    }
+    graphics.strokePath();
+
+    // Draw hot core (yellow/white)
+    graphics.lineStyle(2, 0xffff44, 1.0);
+    graphics.beginPath();
+    graphics.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      graphics.lineTo(points[i].x, points[i].y);
+    }
+    graphics.strokePath();
+
+    // Fade out and destroy
+    this.tweens.add({
+      targets: graphics,
+      alpha: 0,
+      duration: 200,
+      ease: 'Cubic.easeOut',
+      onComplete: () => graphics.destroy()
+    });
+
+    // Add impact effect at end point
+    const impact = this.add.circle(toX, toY, 8, 0xff6600, 0.8).setDepth(51);
+    this.tweens.add({
+      targets: impact,
+      radius: 20,
+      alpha: 0,
+      duration: 200,
+      ease: 'Cubic.easeOut',
+      onComplete: () => impact.destroy()
     });
   }
 

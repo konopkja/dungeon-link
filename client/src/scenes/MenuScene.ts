@@ -73,9 +73,9 @@ const CLASS_DATA: Partial<Record<ClassName, ClassDisplayData>> = {
   [ClassName.Mage]: {
     name: 'Mage',
     role: 'Ranged Caster',
-    description: 'A powerful arcane spellcaster commanding fire, frost, and arcane energies. Mages deal devastating AoE damage from range and can become immune with Ice Block.',
+    description: 'A powerful arcane spellcaster commanding fire and arcane energies. Mages deal devastating damage, stun enemies with Pyroblast, recover mana with Meditation, and become immune with Ice Block.',
     stats: { health: 70, mana: 130, attackPower: 0, spellPower: 18, armor: 3, crit: 10 },
-    abilities: ['Fireball', 'Frostbolt', 'Blizzard', 'Pyroblast', 'Ice Block']
+    abilities: ['Fireball', 'Meditation', 'Blaze', 'Pyroblast', 'Ice Block']
   },
   [ClassName.Warlock]: {
     name: 'Warlock',

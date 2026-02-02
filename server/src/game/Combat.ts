@@ -194,23 +194,24 @@ export function processAbilityCast(
         killed: targetDied
       });
 
-      // Frostbolt applies a slow debuff to enemies
-      if (abilityId === 'mage_frostbolt' && 'debuffs' in targetEntity && targetEntity.isAlive) {
-        const slowDuration = 3 + rank; // 4/5/6/7/8 seconds at ranks 1-5
-        const slowDebuff = {
-          id: `frostbolt_slow_${Date.now()}_${targetEntity.id}`,
+      // Pyroblast applies a 3 second stun to enemies
+      if (abilityId === 'mage_pyroblast' && 'debuffs' in targetEntity && targetEntity.isAlive) {
+        const stunDuration = 3;
+        const stunDebuff = {
+          id: `pyroblast_stun_${Date.now()}_${targetEntity.id}`,
           sourceId: caster.id,
-          abilityId: 'mage_frostbolt',
-          name: 'Frostbolt Slow',
-          damagePerTick: 0, // No damage, just slow
+          abilityId: 'mage_pyroblast',
+          name: 'Pyroblast Stun',
+          damagePerTick: 0,
           tickInterval: 1,
-          remainingDuration: slowDuration,
-          lastTickTime: Date.now() / 1000
+          remainingDuration: stunDuration,
+          lastTickTime: Date.now() / 1000,
+          isStun: true // Flag for stun effect
         };
-        // Remove existing slow and add new one
-        targetEntity.debuffs = targetEntity.debuffs.filter(d => d.abilityId !== 'mage_frostbolt');
-        targetEntity.debuffs.push(slowDebuff);
-        console.log(`[DEBUG] Frostbolt slowed ${targetEntity.name} for ${slowDuration}s`);
+        // Remove existing stun and add new one
+        targetEntity.debuffs = targetEntity.debuffs.filter(d => d.abilityId !== 'mage_pyroblast');
+        targetEntity.debuffs.push(stunDebuff);
+        console.log(`[DEBUG] Pyroblast stunned ${targetEntity.name} for ${stunDuration}s`);
       }
       break;
     }
@@ -276,6 +277,23 @@ export function processAbilityCast(
         'shaman_ancestral': 6 + rank * 2, // Ancestral Spirit - 6/8/10/12/14s, heals when hit
       };
       const duration = buffDurations[abilityId] ?? 10;
+
+      // Handle Meditation - instant mana restore, no buff needed
+      if (abilityId === 'mage_meditation') {
+        // 50% base + 5% per rank (50/55/60/65/70% at ranks 1-5)
+        const manaPercent = 0.50 + (rank - 1) * 0.05;
+        const manaRestore = Math.round(buffTarget.stats.maxMana * manaPercent);
+        buffTarget.stats.mana = Math.min(buffTarget.stats.maxMana, buffTarget.stats.mana + manaRestore);
+
+        events.push({
+          sourceId: caster.id,
+          targetId: buffTarget.id,
+          abilityId,
+          manaRestore
+        });
+        console.log(`[DEBUG] Meditation restored ${manaRestore} mana (${Math.round(manaPercent * 100)}%) to ${buffTarget.name}`);
+        break;
+      }
 
       // Create the buff with rank info for scaling effects
       const buff: Buff = {

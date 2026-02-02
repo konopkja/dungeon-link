@@ -80,6 +80,9 @@ export class GameStateManager {
     // Spawn vendor in start room
     this.spawnVendorInStartRoom(state);
 
+    // Apply floor theme buffs to explain environmental effects
+    this.applyFloorThemeBuffs(state);
+
     console.log(`[DEBUG] Player created: ${playerName} (${classId}), buffs: ${JSON.stringify(player.buffs)}, buffs length: ${player.buffs.length}`);
 
     return { runId, playerId, state };
@@ -114,6 +117,16 @@ export class GameStateManager {
       if (ability.abilityId === 'shaman_bolt') {
         console.log(`[DEBUG] Migrating ability shaman_bolt -> shaman_chainlight`);
         return { ...ability, abilityId: 'shaman_chainlight' };
+      }
+      // Migrate mage_frostbolt -> mage_meditation
+      if (ability.abilityId === 'mage_frostbolt') {
+        console.log(`[DEBUG] Migrating ability mage_frostbolt -> mage_meditation`);
+        return { ...ability, abilityId: 'mage_meditation' };
+      }
+      // Migrate mage_blizzard -> mage_blaze
+      if (ability.abilityId === 'mage_blizzard') {
+        console.log(`[DEBUG] Migrating ability mage_blizzard -> mage_blaze`);
+        return { ...ability, abilityId: 'mage_blaze' };
       }
       // Migrate paladin_consecration -> paladin_retribution
       if (ability.abilityId === 'paladin_consecration') {
@@ -184,6 +197,9 @@ export class GameStateManager {
 
     // Spawn vendor in start room
     this.spawnVendorInStartRoom(state);
+
+    // Apply floor theme buffs to explain environmental effects
+    this.applyFloorThemeBuffs(state);
 
     console.log(`[DEBUG] Created run from save for ${saveData.playerName} (Level ${saveData.level}, Floor ${savedFloor})`);
 
@@ -400,6 +416,85 @@ export class GameStateManager {
               heal: healAmount,
               abilityId: 'warrior_bloodlust'
             });
+          }
+        }
+
+        // Blaze chain bounce - bounces up to 4 additional times (5 total hits)
+        // Can bounce back and forth between enemies
+        if (input.castAbility === 'mage_blaze' && target && 'isBoss' in target) {
+          const primaryTarget = target as Enemy;
+          const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+
+          if (currentRoom) {
+            const playerAbility = player.abilities.find(a => a.abilityId === 'mage_blaze');
+            const rank = playerAbility?.rank ?? 1;
+
+            // Get ability for damage calculation
+            const blazeAbility = getAbilityById('mage_blaze');
+            if (blazeAbility) {
+              // Bounce to nearby enemies (can hit same enemy multiple times)
+              const bounceRange = 200; // Bounce range
+              let lastTarget = primaryTarget;
+              let bounceCount = 0;
+
+              while (bounceCount < 4) {
+                // Find closest alive enemy to last target (excluding the last target itself)
+                let closestEnemy: Enemy | null = null;
+                let closestDist = Infinity;
+
+                for (const enemy of currentRoom.enemies) {
+                  // Skip dead enemies and the enemy we just bounced from
+                  if (!enemy.isAlive || enemy.id === lastTarget.id) continue;
+
+                  const dx = enemy.position.x - lastTarget.position.x;
+                  const dy = enemy.position.y - lastTarget.position.y;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+
+                  if (dist < closestDist && dist <= bounceRange) {
+                    closestDist = dist;
+                    closestEnemy = enemy;
+                  }
+                }
+
+                if (!closestEnemy) break; // No more targets in range
+
+                // Deal damage to bounce target
+                const baseDamage = blazeAbility.ability.baseDamage ?? 25;
+                const scaledDamage = baseDamage * (1 + (rank - 1) * 0.15); // 15% increase per rank
+                const spellPower = player.stats.spellPower;
+                const totalDamage = Math.round(scaledDamage + spellPower * 0.5);
+
+                // Apply damage reduction from resist
+                const resist = closestEnemy.stats.resist;
+                const reduction = 100 / (100 + resist);
+                const finalDamage = Math.round(totalDamage * reduction);
+
+                closestEnemy.stats.health -= finalDamage;
+                const killed = closestEnemy.stats.health <= 0;
+                if (killed) {
+                  closestEnemy.isAlive = false;
+                }
+
+                // Add bounce event
+                events.push({
+                  sourceId: lastTarget.id, // Source is the previous target (for chain visual)
+                  targetId: closestEnemy.id,
+                  abilityId: 'mage_blaze',
+                  damage: finalDamage,
+                  isCrit: false,
+                  killed
+                });
+
+                if (killed) {
+                  this.handleEnemyDeath(state, closestEnemy, player);
+                }
+
+                lastTarget = closestEnemy;
+                bounceCount++;
+              }
+
+              console.log(`[DEBUG] Blaze bounced ${bounceCount} additional times`);
+            }
           }
         }
 
@@ -871,6 +966,10 @@ export class GameStateManager {
               // Check if debuff already applied this room visit
               const hasCurseDebuff = player.buffs.some(b => b.id === 'room_curse');
               if (!hasCurseDebuff) {
+                // Track actual reduction amounts (can't reduce below 0)
+                const actualArmorReduction = Math.min(10, player.stats.armor);
+                const actualResistReduction = Math.min(5, player.stats.resist);
+
                 player.buffs.push({
                   id: 'room_curse',
                   name: 'Cursed Ground',
@@ -879,11 +978,12 @@ export class GameStateManager {
                   maxDuration: 999999,
                   isDebuff: true,
                   statModifiers: {
-                    armor: player.stats.armor - 10,
-                    resist: player.stats.resist - 5
+                    // Store actual deltas as negative values for proper tooltip display
+                    armor: -actualArmorReduction,
+                    resist: -actualResistReduction
                   }
                 });
-                // Apply stat reduction
+                // Apply stat reduction (clamped to 0)
                 player.stats.armor = Math.max(0, player.stats.armor - 10);
                 player.stats.resist = Math.max(0, player.stats.resist - 5);
               }
@@ -894,6 +994,10 @@ export class GameStateManager {
               // Apply stat buff
               const hasBlessBuff = player.buffs.some(b => b.id === 'room_bless');
               if (!hasBlessBuff) {
+                // Store deltas as positive values for buff
+                const armorBonus = 10;
+                const critBonus = 5;
+
                 player.buffs.push({
                   id: 'room_bless',
                   name: 'Blessed Ground',
@@ -902,13 +1006,14 @@ export class GameStateManager {
                   maxDuration: 999999,
                   isDebuff: false,
                   statModifiers: {
-                    armor: player.stats.armor + 10,
-                    crit: player.stats.crit + 5
+                    // Store actual deltas for proper tooltip display and restoration
+                    armor: armorBonus,
+                    crit: critBonus
                   }
                 });
                 // Apply stat boost
-                player.stats.armor += 10;
-                player.stats.crit += 5;
+                player.stats.armor += armorBonus;
+                player.stats.crit += critBonus;
               }
               break;
             }
@@ -1089,11 +1194,8 @@ export class GameStateManager {
             continue;
           }
 
-          // Calculate slow factor from Frostbolt debuff (50% slow)
-          const isSlowed = enemy.debuffs?.some(d =>
-            d.abilityId === 'mage_frostbolt' && d.remainingDuration > 0
-          );
-          const slowFactor = isSlowed ? 0.5 : 1.0;
+          // Calculate slow factor from slow debuffs (reserved for future use)
+          const slowFactor = 1.0;
 
           // Stop patrolling when in combat (players are in the room)
           if (enemy.isPatrolling) {
@@ -2835,6 +2937,9 @@ export class GameStateManager {
     // Spawn vendor in start room for new floor
     this.spawnVendorInStartRoom(state);
 
+    // Apply floor theme buffs to explain environmental effects
+    this.applyFloorThemeBuffs(state);
+
     return state;
   }
 
@@ -3316,27 +3421,121 @@ export class GameStateManager {
    */
   private removeRoomModifierBuffs(state: RunState, player: Player, modifier: import('@dungeon-link/shared').RoomModifier): void {
     if (modifier === 'cursed') {
-      // Remove curse debuff and restore stats
+      // Remove curse debuff and restore stats using stored deltas
       const curseIndex = player.buffs.findIndex(b => b.id === 'room_curse');
       if (curseIndex >= 0) {
+        const curseBuff = player.buffs[curseIndex];
         player.buffs.splice(curseIndex, 1);
-        // Restore stats (recalculate from base + equipment)
-        player.stats.armor += 10;
-        player.stats.resist += 5;
-        console.log(`[MODIFIER] Removed curse debuff from ${player.name}`);
+
+        // Restore stats using the stored deltas (negative values, so subtract to add)
+        if (curseBuff.statModifiers) {
+          // statModifiers.armor is negative (e.g., -3), so subtracting it adds back
+          player.stats.armor -= curseBuff.statModifiers.armor ?? 0;
+          player.stats.resist -= curseBuff.statModifiers.resist ?? 0;
+        }
+        console.log(`[MODIFIER] Removed curse debuff from ${player.name}, restored armor/resist`);
       }
     } else if (modifier === 'blessed') {
-      // Remove bless buff
+      // Remove bless buff using stored deltas
       const blessIndex = player.buffs.findIndex(b => b.id === 'room_bless');
       if (blessIndex >= 0) {
+        const blessBuff = player.buffs[blessIndex];
         player.buffs.splice(blessIndex, 1);
-        // Remove stat boost
-        player.stats.armor -= 10;
-        player.stats.crit -= 5;
+
+        // Remove stat boost using stored deltas (positive values, so subtract)
+        if (blessBuff.statModifiers) {
+          player.stats.armor = Math.max(0, player.stats.armor - (blessBuff.statModifiers.armor ?? 0));
+          player.stats.crit = Math.max(0, player.stats.crit - (blessBuff.statModifiers.crit ?? 0));
+        }
         console.log(`[MODIFIER] Removed blessed buff from ${player.name}`);
       }
     }
     // 'burning' and 'dark' don't have persistent buffs to remove
+  }
+
+  /**
+   * Apply floor theme buff/debuff to explain the floor's environmental effects
+   * Called when starting a new run or advancing to a new floor
+   */
+  private applyFloorThemeBuffs(state: RunState): void {
+    const theme = state.dungeon.theme;
+
+    // Floor theme buff IDs for removal
+    const floorThemeBuffIds = ['floor_inferno', 'floor_frozen', 'floor_swamp', 'floor_shadow', 'floor_treasure'];
+
+    for (const player of state.players) {
+      // Remove any existing floor theme buffs first
+      player.buffs = player.buffs.filter(b => !floorThemeBuffIds.includes(b.id));
+
+      // Apply theme-specific buff based on current floor theme
+      switch (theme) {
+        case FloorTheme.Inferno:
+          player.buffs.push({
+            id: 'floor_inferno',
+            name: 'Inferno',
+            icon: 'fire',
+            duration: 999999,
+            maxDuration: 999999,
+            isDebuff: true,
+            statModifiers: {} // No stat change, just informational
+          });
+          break;
+
+        case FloorTheme.Frozen:
+          player.buffs.push({
+            id: 'floor_frozen',
+            name: 'Frozen Ground',
+            icon: 'frost',
+            duration: 999999,
+            maxDuration: 999999,
+            isDebuff: true,
+            statModifiers: {} // Movement modifier handled separately
+          });
+          break;
+
+        case FloorTheme.Swamp:
+          player.buffs.push({
+            id: 'floor_swamp',
+            name: 'Toxic Swamp',
+            icon: 'poison',
+            duration: 999999,
+            maxDuration: 999999,
+            isDebuff: true,
+            statModifiers: {}
+          });
+          break;
+
+        case FloorTheme.Shadow:
+          player.buffs.push({
+            id: 'floor_shadow',
+            name: 'Darkness',
+            icon: 'shadow',
+            duration: 999999,
+            maxDuration: 999999,
+            isDebuff: true,
+            statModifiers: {}
+          });
+          break;
+
+        case FloorTheme.Treasure:
+          player.buffs.push({
+            id: 'floor_treasure',
+            name: 'Treasure Vault',
+            icon: 'gold',
+            duration: 999999,
+            maxDuration: 999999,
+            isDebuff: false, // This is a positive indicator
+            statModifiers: {}
+          });
+          break;
+
+        // FloorTheme.Crypt is standard - no buff needed
+      }
+    }
+
+    if (theme !== FloorTheme.Crypt) {
+      console.log(`[THEME] Applied ${theme} floor theme buff to all players`);
+    }
   }
 
   /**

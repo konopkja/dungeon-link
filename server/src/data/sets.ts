@@ -22,13 +22,13 @@ export const ITEM_SETS: SetDefinition[] = [
       },
       {
         piecesRequired: 3,
-        bonusStats: { crit: 8, haste: 5 },
-        bonusDescription: '+8% Crit, +5% Haste'
+        bonusStats: { crit: 8, haste: 5, lifesteal: 1 },
+        bonusDescription: '+8% Crit, +5% Haste, +1% Lifesteal'
       },
       {
         piecesRequired: 5,
-        bonusStats: { spellPower: 40, mana: 50, crit: 10 },
-        bonusDescription: '+40 Spell Power, +50 Mana, +10% Crit'
+        bonusStats: { spellPower: 40, mana: 50, crit: 10, lifesteal: 2 },
+        bonusDescription: '+40 Spell Power, +50 Mana, +10% Crit, +2% Lifesteal'
       }
     ]
   },
@@ -124,7 +124,7 @@ const SET_PIECE_NAMES: Record<string, Record<EquipSlot, string>> = {
 
 // Base stats for set pieces by set type
 const SET_BASE_STATS: Record<SetType, Partial<Record<keyof ItemStats, number>>> = {
-  [SetType.Caster]: { spellPower: 0.4, mana: 0.3, crit: 0.15, haste: 0.15 },
+  [SetType.Caster]: { spellPower: 0.4, mana: 0.3, crit: 0.15, haste: 0.1, lifesteal: 0.05 },
   [SetType.MeleeDPS]: { attackPower: 0.4, crit: 0.25, haste: 0.2, lifesteal: 0.15 },
   [SetType.Tank]: { armor: 0.35, health: 0.35, resist: 0.2, attackPower: 0.1 }
 };
