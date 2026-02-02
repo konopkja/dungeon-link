@@ -2095,6 +2095,10 @@ export class GameStateManager {
         for (const player of state.players) {
           if (!player.isAlive) continue;
 
+          // Ice Block makes player immune to ALL damage including ground effects
+          const hasIceBlock = player.buffs.some(b => b.icon === 'mage_iceblock');
+          if (hasIceBlock) continue;
+
           const dx = player.position.x - effect.position.x;
           const dy = player.position.y - effect.position.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
