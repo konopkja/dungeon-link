@@ -14,6 +14,16 @@ export interface AbilityUIData {
   description?: string;
 }
 
+// Migration map for old ability IDs -> new ability IDs
+const ABILITY_MIGRATIONS: Record<string, string> = {
+  'mage_frostbolt': 'mage_meditation',
+  'mage_blizzard': 'mage_blaze',
+  'rogue_backstab': 'rogue_stealth',
+  'rogue_eviscerate': 'rogue_blind',
+  'shaman_bolt': 'shaman_chainlight',
+  'paladin_consecration': 'paladin_retribution',
+};
+
 export class AbilitySystem {
   private scene: Phaser.Scene;
   private abilityData: Map<string, { name: string; cooldown: number; manaCost: number; type: AbilityType; description: string }> = new Map();
@@ -21,6 +31,13 @@ export class AbilitySystem {
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.loadAbilityData();
+  }
+
+  /**
+   * Migrate old ability ID to new one if needed
+   */
+  private migrateAbilityId(abilityId: string): string {
+    return ABILITY_MIGRATIONS[abilityId] ?? abilityId;
   }
 
   /**
@@ -89,9 +106,11 @@ export class AbilitySystem {
     if (!player) return [];
 
     return player.abilities.map((pa, index) => {
-      const data = this.abilityData.get(pa.abilityId);
+      // Migrate old ability IDs to new ones for display
+      const migratedId = this.migrateAbilityId(pa.abilityId);
+      const data = this.abilityData.get(migratedId);
       return {
-        abilityId: pa.abilityId,
+        abilityId: pa.abilityId, // Keep original for server communication
         name: data?.name ?? 'Unknown',
         rank: pa.rank,
         cooldown: pa.currentCooldown,
@@ -99,7 +118,7 @@ export class AbilitySystem {
         manaCost: data?.manaCost ?? 0,
         type: data?.type ?? AbilityType.Damage,
         keybind: String(index + 1),
-        description: this.getDynamicDescription(pa.abilityId, pa.rank)
+        description: this.getDynamicDescription(migratedId, pa.rank)
       };
     });
   }
@@ -108,17 +127,19 @@ export class AbilitySystem {
    * Get ability name by ID
    */
   getAbilityName(abilityId: string): string {
-    return this.abilityData.get(abilityId)?.name ?? 'Unknown';
+    const migratedId = this.migrateAbilityId(abilityId);
+    return this.abilityData.get(migratedId)?.name ?? 'Unknown';
   }
 
   /**
    * Get ability description by ID (optionally with rank for dynamic values)
    */
   getAbilityDescription(abilityId: string, rank?: number): string {
+    const migratedId = this.migrateAbilityId(abilityId);
     if (rank !== undefined) {
-      return this.getDynamicDescription(abilityId, rank);
+      return this.getDynamicDescription(migratedId, rank);
     }
-    return this.abilityData.get(abilityId)?.description ?? '';
+    return this.abilityData.get(migratedId)?.description ?? '';
   }
 
   /**
@@ -149,7 +170,8 @@ export class AbilitySystem {
     const playerAbility = player.abilities.find(a => a.abilityId === abilityId);
     if (!playerAbility) return false;
 
-    const data = this.abilityData.get(abilityId);
+    const migratedId = this.migrateAbilityId(abilityId);
+    const data = this.abilityData.get(migratedId);
     if (!data) return false;
 
     return playerAbility.currentCooldown <= 0 && player.stats.mana >= data.manaCost;

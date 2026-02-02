@@ -1402,7 +1402,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getAbilityDescription(abilityId: string, rank: number = 1): string {
-    const abilityInfo = getAbilityById(abilityId);
+    // Migrate old ability IDs to new ones
+    const ABILITY_MIGRATIONS: Record<string, string> = {
+      'mage_frostbolt': 'mage_meditation',
+      'mage_blizzard': 'mage_blaze',
+      'rogue_backstab': 'rogue_stealth',
+      'rogue_eviscerate': 'rogue_blind',
+      'shaman_bolt': 'shaman_chainlight',
+      'paladin_consecration': 'paladin_retribution',
+    };
+    const migratedId = ABILITY_MIGRATIONS[abilityId] ?? abilityId;
+
+    const abilityInfo = getAbilityById(migratedId);
     if (!abilityInfo) return 'Unknown ability';
 
     const ability = abilityInfo.ability;
@@ -1411,25 +1422,25 @@ export class GameScene extends Phaser.Scene {
     let description = ability.description;
 
     // Dynamic descriptions for abilities that scale with rank
-    if (abilityId === 'mage_meditation') {
+    if (migratedId === 'mage_meditation') {
       // 50% base + 5% per rank (50/55/60/65/70% at ranks 1-5)
       const manaPercent = 50 + (rank - 1) * 5;
       description = `Enter a meditative state to quickly restore ${manaPercent}% of max mana.`;
-    } else if (abilityId === 'mage_blaze') {
+    } else if (migratedId === 'mage_blaze') {
       // 15% damage increase per rank
       const damageBonus = (rank - 1) * 15;
       description = `Fire that bounces between enemies, hitting up to 5 targets.${damageBonus > 0 ? ` +${damageBonus}% damage.` : ''}`;
-    } else if (abilityId === 'rogue_vanish') {
+    } else if (migratedId === 'rogue_vanish') {
       const duration = 4 + rank;
       description = `Vanish from sight for ${duration}s, dropping all threat. Next attack deals +50% damage.`;
-    } else if (abilityId === 'rogue_stealth') {
+    } else if (migratedId === 'rogue_stealth') {
       const duration = 8 + rank * 2;
       description = `Enter stealth for ${duration}s. Next Sinister Strike deals double damage.`;
-    } else if (abilityId === 'shaman_ancestral') {
+    } else if (migratedId === 'shaman_ancestral') {
       const charges = 2 + rank;
       const duration = 6 + rank * 2;
       description = `Ancestral spirits protect you for ${duration}s. Heals when hit (${charges} charges).`;
-    } else if (abilityId === 'warrior_bloodlust') {
+    } else if (migratedId === 'warrior_bloodlust') {
       const healPercent = 15 + rank * 5;
       const duration = 8 + rank * 2;
       description = `Enter a bloodthirsty rage for ${duration}s. Heal ${healPercent}% of damage dealt.`;
@@ -1439,7 +1450,7 @@ export class GameScene extends Phaser.Scene {
     if (player) {
       const { attackPower, spellPower } = player.stats;
 
-      if (ability.baseDamage && abilityId !== 'mage_blaze') {
+      if (ability.baseDamage && migratedId !== 'mage_blaze') {
         const dmg = calculateAbilityDamage(ability.baseDamage, rank, attackPower, spellPower);
         description += `\nDamage: ${dmg.min}-${dmg.max}`;
       }
