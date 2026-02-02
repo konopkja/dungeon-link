@@ -34,7 +34,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.5, itemSlot: EquipSlot.Weapon, rarityWeights: { [Rarity.Uncommon]: 0.7, [Rarity.Rare]: 0.3 } },
       { type: 'item', dropChance: 0.4, rarityWeights: { [Rarity.Common]: 0.5, [Rarity.Uncommon]: 0.5 } },
-      { type: 'ability', dropChance: 0.35 }
+      { type: 'ability', dropChance: 0.40 }
     ]
     // Lore: The first commander of the Valorian Guard, Lord Ossian made a pact with
     // darkness to save his dying soldiers. Now he leads them eternally in undeath.
@@ -57,7 +57,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.5, itemSlot: EquipSlot.Ring, rarityWeights: { [Rarity.Uncommon]: 0.6, [Rarity.Rare]: 0.4 } },
       { type: 'item', dropChance: 0.4, rarityWeights: { [Rarity.Common]: 0.4, [Rarity.Uncommon]: 0.6 } },
-      { type: 'ability', dropChance: 0.35 }
+      { type: 'ability', dropChance: 0.40 }
     ]
     // Lore: The Valorians kept giant spiders to guard the lower passages. Silkweaver
     // consumed her handlers and has grown immense on centuries of trapped adventurers.
@@ -91,7 +91,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.6, itemSlot: EquipSlot.Chest, rarityWeights: { [Rarity.Uncommon]: 0.4, [Rarity.Rare]: 0.5, [Rarity.Epic]: 0.1 } },
       { type: 'item', dropChance: 0.5, rarityWeights: { [Rarity.Uncommon]: 0.5, [Rarity.Rare]: 0.5 } },
-      { type: 'ability', dropChance: 0.40 }
+      { type: 'ability', dropChance: 0.45 }
     ]
     // Lore: A legendary warlord who sought the crypts' power to conquer the surface.
     // The darkness granted his wish—eternal strength, but eternal imprisonment.
@@ -120,7 +120,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.6, itemSlot: EquipSlot.Head, rarityWeights: { [Rarity.Rare]: 0.6, [Rarity.Epic]: 0.4 } },
       { type: 'item', dropChance: 0.5, rarityWeights: { [Rarity.Uncommon]: 0.3, [Rarity.Rare]: 0.7 } },
-      { type: 'ability', dropChance: 0.40 }
+      { type: 'ability', dropChance: 0.45 }
     ]
     // Lore: Once the Valorian Order's greatest healer, Velindra sought to cure death itself.
     // Her experiments succeeded—but the cure was worse than the disease.
@@ -154,7 +154,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.7, itemSlot: EquipSlot.Weapon, rarityWeights: { [Rarity.Rare]: 0.4, [Rarity.Epic]: 0.5, [Rarity.Legendary]: 0.1 } },
       { type: 'item', dropChance: 0.6, rarityWeights: { [Rarity.Rare]: 0.5, [Rarity.Epic]: 0.5 } },
-      { type: 'ability', dropChance: 0.45 },
+      { type: 'ability', dropChance: 0.50 },
       { type: 'cosmetic', dropChance: 0.05 }
     ]
     // Lore: The Valorians didn't build around Emberclaw—they built to contain him.
@@ -184,7 +184,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.7, itemSlot: EquipSlot.Trinket, rarityWeights: { [Rarity.Epic]: 0.7, [Rarity.Legendary]: 0.3 } },
       { type: 'item', dropChance: 0.6, rarityWeights: { [Rarity.Rare]: 0.4, [Rarity.Epic]: 0.6 } },
-      { type: 'ability', dropChance: 0.45 },
+      { type: 'ability', dropChance: 0.50 },
       { type: 'cosmetic', dropChance: 0.08 }
     ]
     // Lore: Nethris is not truly here—she exists between dimensions, reaching through
@@ -225,7 +225,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.8, rarityWeights: { [Rarity.Epic]: 0.5, [Rarity.Legendary]: 0.5 } },
       { type: 'item', dropChance: 0.7, rarityWeights: { [Rarity.Epic]: 0.6, [Rarity.Legendary]: 0.4 } },
-      { type: 'ability', dropChance: 0.50 },
+      { type: 'ability', dropChance: 0.55 },
       { type: 'cosmetic', dropChance: 0.10 }
     ]
     // Lore: Before mortals walked the earth, titans shaped continents. Gorvax slumbers
@@ -261,7 +261,7 @@ export const BOSSES: BossDefinition[] = [
     lootTable: [
       { type: 'item', dropChance: 0.8, rarityWeights: { [Rarity.Epic]: 0.4, [Rarity.Legendary]: 0.6 } },
       { type: 'item', dropChance: 0.7, rarityWeights: { [Rarity.Epic]: 0.5, [Rarity.Legendary]: 0.5 } },
-      { type: 'ability', dropChance: 0.50 },
+      { type: 'ability', dropChance: 0.55 },
       { type: 'cosmetic', dropChance: 0.12 }
     ]
     // Lore: No one knows its true name—those who learn it cease to exist. It is not evil;

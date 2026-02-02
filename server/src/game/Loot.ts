@@ -127,8 +127,8 @@ export function generateRareLoot(
       loot.push({ type: 'item', item });
     }
 
-    // 25% chance for ability
-    if (rng.chance(0.25)) {
+    // 30% chance for ability
+    if (rng.chance(0.30)) {
       const abilityDrop = generateAbilityDrop(rng, player, floor);
       if (abilityDrop) {
         loot.push(abilityDrop);
