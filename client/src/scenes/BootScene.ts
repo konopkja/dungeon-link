@@ -17,6 +17,25 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    // Setup loading progress callbacks
+    this.load.on('progress', (value: number) => {
+      const progressBar = document.getElementById('loading-progress-bar');
+      const percentText = document.getElementById('loading-percent');
+      if (progressBar) {
+        progressBar.style.width = `${Math.round(value * 100)}%`;
+      }
+      if (percentText) {
+        percentText.textContent = `${Math.round(value * 100)}%`;
+      }
+    });
+
+    this.load.on('complete', () => {
+      const percentText = document.getElementById('loading-percent');
+      if (percentText) {
+        percentText.textContent = 'Initializing...';
+      }
+    });
+
     // Load player character images
     const classes = ['warrior', 'paladin', 'hunter', 'rogue', 'priest', 'shaman', 'mage', 'warlock', 'druid'];
     for (const cls of classes) {
@@ -270,6 +289,12 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Hide the CSS loading overlay now that Phaser is ready
+    const loadingOverlay = document.getElementById('game-loading-overlay');
+    if (loadingOverlay) {
+      loadingOverlay.classList.add('hidden');
+    }
+
     const width = this.cameras.main.width;
     const height = this.cameras.main.height;
 

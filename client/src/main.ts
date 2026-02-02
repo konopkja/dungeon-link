@@ -406,6 +406,14 @@ function returnToMenu(): void {
     game = null;
   }
 
+  // Reset the loading overlay for next game start
+  const loadingOverlay = document.getElementById('game-loading-overlay');
+  const progressBar = document.getElementById('loading-progress-bar');
+  const percentText = document.getElementById('loading-percent');
+  if (loadingOverlay) loadingOverlay.classList.remove('hidden');
+  if (progressBar) progressBar.style.width = '0%';
+  if (percentText) percentText.textContent = '0%';
+
   // Clear session storage
   sessionStorage.removeItem('dungeonlink_load_save');
   sessionStorage.removeItem('dungeonlink_save_slot');

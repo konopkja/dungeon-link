@@ -2322,6 +2322,91 @@
       display: block;
     }
 
+    /* Game Loading Overlay - shows immediately before Phaser loads */
+    #game-loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 50%, #0d0d1a 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      min-height: 100vh;
+    }
+
+    #game-loading-overlay.hidden {
+      display: none;
+    }
+
+    .game-loading-content {
+      text-align: center;
+    }
+
+    .game-loading-title {
+      font-family: 'Cinzel', serif;
+      font-size: 3rem;
+      color: #ffd700;
+      text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+      margin-bottom: 0.5rem;
+      letter-spacing: 0.1em;
+    }
+
+    .game-loading-subtitle {
+      font-family: 'Crimson Text', serif;
+      font-size: 1.2rem;
+      color: #aa8855;
+      font-style: italic;
+      margin-bottom: 2rem;
+    }
+
+    .game-loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 3px solid rgba(255, 215, 0, 0.2);
+      border-top-color: #ffd700;
+      border-radius: 50%;
+      margin: 0 auto 1.5rem;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .game-loading-text {
+      font-family: 'Crimson Text', serif;
+      font-size: 1.1rem;
+      color: #e0e0e0;
+      margin-bottom: 1rem;
+    }
+
+    .game-loading-progress {
+      width: 300px;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 0 auto 0.5rem;
+      border: 1px solid rgba(255, 215, 0, 0.3);
+    }
+
+    .game-loading-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #ffd700, #ffaa00);
+      border-radius: 4px;
+      transition: width 0.2s ease;
+    }
+
+    .game-loading-percent {
+      font-family: 'Crimson Text', serif;
+      font-size: 0.9rem;
+      color: #888899;
+    }
+
     #landing-page.hidden {
       display: none;
     }
@@ -2980,7 +3065,21 @@
   </div>
 
   <!-- Game Container -->
-  <div id="game-container"></div>
+  <div id="game-container">
+    <!-- Immediate loading overlay (shown before Phaser initializes) -->
+    <div id="game-loading-overlay">
+      <div class="game-loading-content">
+        <h1 class="game-loading-title">ABYSSAL DESCENT</h1>
+        <p class="game-loading-subtitle">The Depths Await</p>
+        <div class="game-loading-spinner"></div>
+        <p class="game-loading-text">Preparing the descent...</p>
+        <div class="game-loading-progress">
+          <div class="game-loading-progress-bar" id="loading-progress-bar"></div>
+        </div>
+        <p class="game-loading-percent" id="loading-percent">0%</p>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>
