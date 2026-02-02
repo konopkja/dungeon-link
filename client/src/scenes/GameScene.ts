@@ -1560,6 +1560,14 @@ export class GameScene extends Phaser.Scene {
           // Character out of lives - return to menu
           this.showNotification('CHARACTER DELETED - Out of lives!', undefined, 'danger');
           this.time.delayedCall(2000, () => {
+            // CRITICAL: Clear WebSocket state to prevent stale dungeon data
+            // Without this, the next character creation may render the OLD dungeon
+            // while enemies spawn at NEW positions (causing "invisible room" bug)
+            wsClient.disconnect();
+            wsClient.runId = null;
+            wsClient.playerId = null;
+            wsClient.currentState = null;
+
             this.shutdown();
             this.scene.start('MenuScene');
             this.scene.stop('GameScene');
