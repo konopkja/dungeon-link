@@ -768,3 +768,304 @@ if (this.hiddenEnemyIds.has(enemy.id) && !this.revealedAmbushEnemyIds.has(enemy.
 | File | Changes |
 |------|---------|
 | `client/src/scenes/GameScene.ts` | Buff icons rendered directly on scene, tooltip boundary checking, ambush reveal animation |
+
+---
+
+## 7. Armor System Bugs
+
+### How Armor Works
+
+The armor system uses a standard diminishing returns formula:
+
+```typescript
+const reduction = 100 / (100 + armor);
+finalDamage = baseDamage * reduction;
+```
+
+**Examples:**
+- Armor 0: 100% damage taken (no reduction)
+- Armor 50: 66.7% damage taken (33.3% reduction)
+- Armor 100: 50% damage taken (50% reduction)
+- Armor 200: 33.3% damage taken (66.7% reduction)
+
+This formula:
+1. Never reduces damage to 0 (asymptotic)
+2. Has diminishing returns - each point of armor is worth less than the previous
+3. Works correctly even with 0 armor
+
+**Physical vs Magic:**
+- Physical attacks (melee, ranged enemies) use `armor` stat
+- Magic attacks (caster enemies, spells) use `resist` stat
+
+---
+
+### Bug 7.1: Cursed Room Stat Exploit
+
+**Problem:**
+Players could gain armor by entering and leaving a cursed room.
+
+**Root Cause:**
+```typescript
+// When ENTERING cursed room:
+player.stats.armor = Math.max(0, player.stats.armor - 10);  // Clamped to 0
+
+// When LEAVING cursed room:
+player.stats.armor += 10;  // Always adds 10, even if less was subtracted!
+```
+
+**Example:** Mage with 3 base armor:
+1. Enter cursed room → armor = max(0, 3-10) = 0 (only lost 3)
+2. Leave cursed room → armor = 0 + 10 = **10** (gained 7 armor!)
+
+**Solution:**
+Track the actual amount reduced and only restore that amount:
+
+```typescript
+// When applying curse, track actual reduction
+const actualArmorReduction = Math.min(10, player.stats.armor);
+const actualResistReduction = Math.min(5, player.stats.resist);
+
+// Store actual reductions in buff for later restoration
+statModifiers: {
+  armor: -actualArmorReduction,  // Negative = reduction
+  resist: -actualResistReduction
+}
+
+// When removing curse, restore exactly what was taken
+player.stats.armor -= buff.statModifiers.armor;  // Subtracting negative = adding
+player.stats.resist -= buff.statModifiers.resist;
+```
+
+---
+
+### Bug 7.2: Blessed Room Can Create Negative Armor
+
+**Problem:**
+When leaving a blessed room, armor is reduced without a floor check.
+
+**Root Cause:**
+```typescript
+// When LEAVING blessed room:
+player.stats.armor -= 10;  // No Math.max(0, ...) protection!
+```
+
+If player's armor changed while in blessed room (equipment removed, other debuffs), this could make armor negative.
+
+**Example:**
+1. Player with 15 armor enters blessed room → armor = 25
+2. Player unequips armor piece (-12 armor) → armor = 13
+3. Player leaves blessed room → armor = 13 - 10 = 3 ✓ (OK in this case)
+
+But if:
+1. Player with 5 armor enters blessed room → armor = 15
+2. Player gets cursed by enemy (-10 armor) → armor = 5
+3. Player leaves blessed room → armor = 5 - 10 = **-5** (BUG!)
+
+**Solution:**
+```typescript
+player.stats.armor = Math.max(0, player.stats.armor - 10);
+```
+
+---
+
+### Bug 7.3: StatModifiers Display Wrong Values
+
+**Problem:**
+The buff tooltip shows confusing values instead of the delta.
+
+**Root Cause:**
+```typescript
+statModifiers: {
+  armor: player.stats.armor - 10,  // This is the RESULT, not the CHANGE
+}
+```
+
+The tooltip code expects deltas (e.g., -10) but gets absolute values.
+
+**Solution:**
+Store the actual change (delta) in statModifiers:
+
+```typescript
+statModifiers: {
+  armor: -10,  // The change, not the result
+  resist: -5
+}
+```
+
+---
+
+### Key Invariants for Stat Modifiers
+
+1. **Stats must never go negative** - Always use `Math.max(0, ...)` when reducing
+2. **Track actual changes** - Store delta in statModifiers, not absolute values
+3. **Restore exactly what was taken** - Don't assume fixed amounts
+4. **StatModifiers represent deltas** - Positive = buff, Negative = debuff
+
+---
+
+## 12. Invisible Room Bug After Character Death
+
+### Problem
+When a character died with 0 lives and was deleted, creating a new character would result in a broken dungeon:
+- Enemies (skeletons) were visible and could attack
+- Rooms were invisible or rendered at wrong positions
+- Corridors existed but player couldn't enter them
+- The game was unplayable
+
+### Root Cause
+
+The death handling code was missing critical WebSocket state cleanup:
+
+**Broken Code (GameScene.ts, lines 1559-1566):**
+```typescript
+if (characterDeleted) {
+  this.showNotification('CHARACTER DELETED - Out of lives!', undefined, 'danger');
+  this.time.delayedCall(2000, () => {
+    this.shutdown();  // Only unsubscribes from messages!
+    this.scene.start('MenuScene');
+    this.scene.stop('GameScene');
+  });
+}
+```
+
+Compare to the working `leaveGame()` function:
+```typescript
+private leaveGame(): void {
+  // Fully disconnect from WebSocket to prevent stale messages
+  wsClient.disconnect();
+  wsClient.runId = null;
+  wsClient.playerId = null;
+  wsClient.currentState = null;  // ← CRITICAL!
+
+  this.shutdown();
+  this.scene.start('MenuScene');
+  this.scene.stop('GameScene');
+}
+```
+
+**The Bug Flow:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Character dies with 0 lives                                  │
+│ 2. Character deleted from localStorage                          │
+│ 3. Return to MenuScene (but wsClient.currentState still has     │
+│    OLD dungeon data from the dead character's run!)             │
+│ 4. Player creates NEW character                                 │
+│ 5. Server creates NEW run with NEW dungeon layout               │
+│ 6. Server sends RUN_CREATED with new dungeon                    │
+│ 7. MenuScene starts GameScene                                   │
+│ 8. GameScene.create() runs:                                     │
+│    if (wsClient.currentState) {  // TRUE - has OLD state!       │
+│      this.renderWorld();         // Renders OLD dungeon!        │
+│    }                                                            │
+│ 9. STATE_UPDATE arrives with NEW enemy positions                │
+│ 10. Enemies render at NEW positions (from server)               │
+│ 11. But rooms are still rendered at OLD positions!              │
+│                                                                 │
+│ RESULT: Enemies visible, rooms invisible/wrong positions        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Solution
+
+Add proper WebSocket cleanup when character is deleted:
+
+**Fixed Code (GameScene.ts):**
+```typescript
+if (characterDeleted) {
+  this.showNotification('CHARACTER DELETED - Out of lives!', undefined, 'danger');
+  this.time.delayedCall(2000, () => {
+    // CRITICAL: Clear WebSocket state to prevent stale dungeon data
+    // Without this, the next character creation may render the OLD dungeon
+    // while enemies spawn at NEW positions (causing "invisible room" bug)
+    wsClient.disconnect();
+    wsClient.runId = null;
+    wsClient.playerId = null;
+    wsClient.currentState = null;
+
+    this.shutdown();
+    this.scene.start('MenuScene');
+    this.scene.stop('GameScene');
+  });
+}
+```
+
+### Why This Works
+
+1. **`wsClient.currentState = null`** - Clears the stale dungeon data
+2. **`wsClient.disconnect()`** - Closes old WebSocket connection
+3. **GameScene.create()** checks: `if (wsClient.currentState)` → now `false`
+4. GameScene waits for `RUN_CREATED` message before rendering
+5. New dungeon renders correctly
+
+### Key Invariants
+
+| Invariant | Why It Matters |
+|-----------|----------------|
+| Clear `currentState` on run end | Prevents rendering stale dungeon |
+| Clear `runId` and `playerId` | Prevents server confusion |
+| Disconnect WebSocket | Clean break from old session |
+| Wait for `RUN_CREATED` before render | Ensures fresh state |
+
+### Related Code Paths
+
+All paths that end a run and return to menu MUST clean up WebSocket state:
+
+| Path | File | Cleanup Status |
+|------|------|----------------|
+| Leave Game button | GameScene.ts:leaveGame() | ✅ Always worked |
+| Character death (0 lives) | GameScene.ts:update() | ✅ Fixed |
+| Server disconnect | WebSocketClient.ts | ⚠️ Automatic via disconnect event |
+
+### Testing
+
+To verify the fix:
+1. Create a new character
+2. Play until you have 1 life remaining
+3. Intentionally die to enemies
+4. Character should be deleted, return to menu
+5. Create another new character
+6. Verify: rooms render correctly, enemies are inside rooms
+
+### Debug Logging
+
+If this bug recurs, add these logs:
+
+```typescript
+// In GameScene.create():
+console.log('[DEBUG] create() - currentState:', wsClient.currentState ? 'EXISTS' : 'NULL');
+console.log('[DEBUG] create() - runId:', wsClient.runId);
+
+// In death handler:
+console.log('[DEBUG] Character deleted, clearing state...');
+console.log('[DEBUG] Before clear - currentState:', wsClient.currentState ? 'EXISTS' : 'NULL');
+// ... cleanup ...
+console.log('[DEBUG] After clear - currentState:', wsClient.currentState ? 'EXISTS' : 'NULL');
+```
+
+---
+
+## CRITICAL: Scene Transition Cleanup Checklist
+
+When transitioning from GameScene to MenuScene, ALWAYS ensure:
+
+```typescript
+// 1. Disconnect WebSocket (prevents stale messages)
+wsClient.disconnect();
+
+// 2. Clear run identifiers (prevents server confusion)
+wsClient.runId = null;
+wsClient.playerId = null;
+
+// 3. Clear game state (prevents stale rendering)
+wsClient.currentState = null;
+
+// 4. Clean up scene (unsubscribe handlers, destroy objects)
+this.shutdown();
+
+// 5. Start new scene BEFORE stopping current (prevents null refs)
+this.scene.start('MenuScene');
+this.scene.stop('GameScene');
+```
+
+Missing ANY of steps 1-3 can cause state leakage bugs.
