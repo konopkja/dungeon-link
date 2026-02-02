@@ -404,13 +404,22 @@ export class GameScene extends Phaser.Scene {
       // Subscribe to server messages
       this.messageUnsubscribe = wsClient.onMessage((message) => this.handleServerMessage(message));
 
-      // Initial render - only if we have valid state (prevents rendering stale data)
-      if (wsClient.currentState) {
-        console.log('[DEBUG] About to call renderWorld with valid state');
+      // Initial render - only if we have valid, fresh state
+      // CRITICAL: Validate that currentState belongs to the current run to prevent
+      // rendering stale floor data from a previous game session
+      const hasValidState = wsClient.currentState &&
+        wsClient.runId &&
+        wsClient.currentState.runId === wsClient.runId;
+
+      if (hasValidState) {
+        console.log('[DEBUG] About to call renderWorld with valid state for run:', wsClient.runId);
         this.renderWorld();
         console.log('[DEBUG] renderWorld completed');
       } else {
-        console.log('[DEBUG] Skipping initial renderWorld - no currentState yet, will render on STATE_UPDATE');
+        console.log('[DEBUG] Skipping initial renderWorld - waiting for fresh state from server');
+        if (wsClient.currentState && wsClient.runId) {
+          console.log('[DEBUG] State runId mismatch:', wsClient.currentState.runId, 'vs', wsClient.runId);
+        }
       }
 
       // Setup click to target
@@ -1536,6 +1545,12 @@ export class GameScene extends Phaser.Scene {
   private renderWorld(): void {
     const state = wsClient.currentState;
     if (!state) return;
+
+    // CRITICAL: Validate state belongs to current run to prevent rendering stale floor data
+    if (wsClient.runId && state.runId !== wsClient.runId) {
+      console.warn('[DEBUG] renderWorld skipped - stale state detected:', state.runId, 'vs', wsClient.runId);
+      return;
+    }
 
     // Update floor text (legacy, hidden)
     if (this.floorText) {

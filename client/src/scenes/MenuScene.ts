@@ -487,6 +487,14 @@ export class MenuScene extends Phaser.Scene {
 
     console.log('[MENU] Starting game with class:', this.selectedClass);
 
+    // CRITICAL: Clear stale state before creating new run
+    // This prevents the bug where old floor data persists after character death
+    // Without this, GameScene.create() may render the OLD dungeon layout
+    // before the server's RUN_CREATED message arrives with fresh data
+    wsClient.currentState = null;
+    wsClient.runId = null;
+    wsClient.playerId = null;
+
     // NOTE: joinRun removed - game is now single-player only
     wsClient.createRun(this.playerName, this.selectedClass);
   }
@@ -495,6 +503,13 @@ export class MenuScene extends Phaser.Scene {
     if (!wsClient.isConnected) {
       return;
     }
+
+    // CRITICAL: Clear stale state before loading saved character
+    // This prevents the bug where old floor data persists from a previous run
+    wsClient.currentState = null;
+    wsClient.runId = null;
+    wsClient.playerId = null;
+
     this.hideMenuOverlay();
     wsClient.createRunFromSave(saveData, slot);
   }

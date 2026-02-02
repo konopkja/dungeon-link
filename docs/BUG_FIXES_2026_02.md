@@ -1069,3 +1069,178 @@ this.scene.stop('GameScene');
 ```
 
 Missing ANY of steps 1-3 can cause state leakage bugs.
+
+---
+
+## 13. Floor Persistence Bug - Additional Fix (2026-02-03)
+
+### Problem
+
+Even after the fix in section 12, users still experienced the invisible room bug after character death. The original fix addressed the death handler, but there were still gaps where stale floor data could persist.
+
+### Root Cause Analysis
+
+The bug had **multiple entry points**, and the original fix only addressed one:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              STALE STATE ENTRY POINTS                           │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. Death handler (✅ Fixed in section 12)                       │
+│    - Character deleted → cleanup before MenuScene               │
+│                                                                 │
+│ 2. MenuScene.startGame() (❌ NOT FIXED - Gap #1)               │
+│    - No cleanup before wsClient.createRun()                     │
+│    - Old currentState persists through scene transition         │
+│                                                                 │
+│ 3. MenuScene.loadSavedCharacter() (❌ NOT FIXED - Gap #2)      │
+│    - No cleanup before wsClient.createRunFromSave()             │
+│    - Old currentState persists through scene transition         │
+│                                                                 │
+│ 4. GameScene.create() (❌ NOT FIXED - Gap #3)                  │
+│    - No validation that currentState matches current runId      │
+│    - Renders stale state if cleanup was incomplete              │
+│                                                                 │
+│ 5. GameScene.renderWorld() (❌ NOT FIXED - Gap #4)             │
+│    - No validation during game loop                             │
+│    - Could render old floor if race condition occurs            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### The Race Condition
+
+Even with death handler cleanup, a race condition exists:
+
+```
+Timeline (Race Condition Scenario):
+─────────────────────────────────────────────────────────────────
+
+T0: Old character dies, death handler starts cleanup
+T1: WebSocket disconnect initiated
+T2: User quickly creates new character (clicks fast)
+T3: MenuScene.startGame() called - wsClient.currentState may still exist!
+T4: GameScene.create() runs, renders old state
+T5: Death handler cleanup completes (too late!)
+T6: RUN_CREATED arrives with fresh state (scene already rendered wrong)
+```
+
+### Solution
+
+Added **defense-in-depth** - multiple layers of protection:
+
+**Layer 1: MenuScene Pre-Cleanup** (`client/src/scenes/MenuScene.ts`)
+
+```typescript
+private startGame(): void {
+  // ... validation ...
+
+  this.isStartingGame = true;
+
+  // CRITICAL: Clear stale state before creating new run
+  // This prevents the bug where old floor data persists after character death
+  // Without this, GameScene.create() may render the OLD dungeon layout
+  // before the server's RUN_CREATED message arrives with fresh data
+  wsClient.currentState = null;
+  wsClient.runId = null;
+  wsClient.playerId = null;
+
+  wsClient.createRun(this.playerName, this.selectedClass);
+}
+
+private loadSavedCharacter(saveData: SaveData, slot: number): void {
+  if (!wsClient.isConnected) return;
+
+  // CRITICAL: Clear stale state before loading saved character
+  wsClient.currentState = null;
+  wsClient.runId = null;
+  wsClient.playerId = null;
+
+  this.hideMenuOverlay();
+  wsClient.createRunFromSave(saveData, slot);
+}
+```
+
+**Layer 2: GameScene State Validation** (`client/src/scenes/GameScene.ts`)
+
+```typescript
+// In create():
+// CRITICAL: Validate that currentState belongs to the current run
+const hasValidState = wsClient.currentState &&
+  wsClient.runId &&
+  wsClient.currentState.runId === wsClient.runId;
+
+if (hasValidState) {
+  console.log('[DEBUG] About to call renderWorld with valid state for run:', wsClient.runId);
+  this.renderWorld();
+} else {
+  console.log('[DEBUG] Skipping initial renderWorld - waiting for fresh state from server');
+}
+
+// In renderWorld():
+private renderWorld(): void {
+  const state = wsClient.currentState;
+  if (!state) return;
+
+  // CRITICAL: Validate state belongs to current run
+  if (wsClient.runId && state.runId !== wsClient.runId) {
+    console.warn('[DEBUG] renderWorld skipped - stale state detected:', state.runId, 'vs', wsClient.runId);
+    return;
+  }
+
+  // ... rest of render logic
+}
+```
+
+### Why Defense-in-Depth?
+
+| Layer | Protection Against |
+|-------|-------------------|
+| Death handler cleanup | Normal death flow |
+| MenuScene pre-cleanup | Race conditions, incomplete cleanup |
+| GameScene runId validation | Any remaining stale state |
+| renderWorld() validation | Stale state during game loop |
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `client/src/scenes/MenuScene.ts` | Added state cleanup in `startGame()` and `loadSavedCharacter()` |
+| `client/src/scenes/GameScene.ts` | Added runId validation in `create()` and `renderWorld()` |
+
+### Testing
+
+To verify all scenarios:
+
+1. **Normal death flow:**
+   - Die with 0 lives → new character → verify rooms render correctly
+
+2. **Quick restart:**
+   - Die → spam click "Create Character" → verify no stale rooms
+
+3. **Load saved character after death:**
+   - Die with 0 lives → load different saved character → verify correct floor
+
+4. **Server reconnect:**
+   - Disconnect network → reconnect → create character → verify correct render
+
+### Debug Logging
+
+Added debug logs to trace state issues:
+
+```
+[DEBUG] About to call renderWorld with valid state for run: abc123
+[DEBUG] Skipping initial renderWorld - waiting for fresh state from server
+[DEBUG] State runId mismatch: oldRun123 vs newRun456
+[DEBUG] renderWorld skipped - stale state detected: oldRun123 vs newRun456
+```
+
+### Key Invariants (Updated)
+
+| Invariant | Enforcement Point |
+|-----------|-------------------|
+| Clear state before new run | MenuScene.startGame(), loadSavedCharacter() |
+| Clear state on death | GameScene death handler |
+| Validate state.runId matches wsClient.runId | GameScene.create(), renderWorld() |
+| Wait for RUN_CREATED before render | GameScene.create() conditional |
+
+---
