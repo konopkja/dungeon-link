@@ -1443,7 +1443,40 @@ export class GameScene extends Phaser.Scene {
     } else if (migratedId === 'warrior_bloodlust') {
       const healPercent = 15 + rank * 5;
       const duration = 8 + rank * 2;
-      description = `Enter a bloodthirsty rage for ${duration}s. Heal ${healPercent}% of damage dealt.`;
+      description = `Enter a bloodthirsty rage for ${duration}s. Heal ${healPercent}% of damage dealt.\nEnables Whirlwind combo!`;
+    } else if (migratedId === 'rogue_blind') {
+      const duration = 6 + rank * 2; // 8/10/12/14/16s
+      description = `Blinds the target with a powder, stunning them for ${duration} seconds.`;
+    } else if (migratedId === 'paladin_judgment') {
+      const stunDuration = 1 + rank; // 2/3/4/5/6s
+      description = `Call down holy judgment on all enemies, dealing damage and stunning them for ${stunDuration} seconds.\nEnables Crusader Strike combo!`;
+    } else if (migratedId === 'paladin_retribution') {
+      const reflectDamage = 5 + rank * 5; // 10/15/20/25/30
+      description = `Activate a holy aura that reflects ${reflectDamage} damage to attackers.`;
+    } else if (migratedId === 'paladin_strike') {
+      description = `A holy-infused melee attack.\nCOMBO: +50% damage and 30% self-heal on Judgment-stunned targets!`;
+    } else if (migratedId === 'warrior_whirlwind') {
+      description = `Spin and hit all nearby enemies with devastating force.\nCOMBO: +25% healing during Bloodlust!`;
+    } else if (migratedId === 'mage_fireball') {
+      description = `Hurl a ball of fire at the enemy.\nCOMBO: +50% damage on Pyroblast-stunned targets!`;
+    } else if (migratedId === 'mage_blaze') {
+      const damageBonus = (rank - 1) * 15;
+      description = `Fire bounces between enemies, hitting up to 5 targets.${damageBonus > 0 ? ` +${damageBonus}% damage.` : ''}\nCOMBO: Stuns all enemies if primary target is Pyroblast-stunned!`;
+    } else if (migratedId === 'warlock_drain') {
+      description = `Drain health from target, healing yourself and your Imp (50%).\nCOMBO: Drains ALL burning enemies if target has Hellfire!`;
+    } else if (migratedId === 'mage_pyroblast') {
+      description = `Massive fireball that stuns the target for 3 seconds.\nEnables Fireball and Blaze combos!`;
+    } else if (migratedId === 'warlock_hellfire') {
+      description = `Burn all nearby enemies with demonic fire. Leaves them burning for additional damage.\nEnables Drain Life combo!`;
+    } else if (migratedId === 'warlock_summon_imp') {
+      // Calculate Imp stats based on floor and rank
+      const floor = wsClient.currentState?.floor ?? 1;
+      const rankBonus = 1 + (rank - 1) * 0.1; // 10% per rank
+      const baseHealth = 100 + floor * 10;
+      const baseSpell = 12 + floor * 3;
+      const impHealth = Math.round(baseHealth * rankBonus);
+      const impDamage = Math.round(baseSpell * rankBonus);
+      description = `Summon a demonic imp that attacks with fire magic and taunts nearby foes every 5s.\nImp HP: ${impHealth} | Damage: ${impDamage}`;
     }
 
     // Add damage/heal info if player stats are available
@@ -5365,6 +5398,7 @@ export class GameScene extends Phaser.Scene {
 
       const state = wsClient.currentState;
       let sourceEnemy: Enemy | null = null;
+      let sourceIsPet = false;
 
       if (state) {
         // Find target position and enemy FIRST (needed for boss animation direction)
@@ -5404,6 +5438,12 @@ export class GameScene extends Phaser.Scene {
           const sourcePet = state.pets?.find(p => p.id === event.sourceId);
           if (sourcePet) {
             sourcePos = sourcePet.position;
+            sourceIsPet = true;
+            // Spawn fire projectile for Imp attacks
+            if (sourcePet.petType === 'imp' && event.damage && targetPos.x !== 0) {
+              this.spawnProjectile(sourcePos.x, sourcePos.y, targetPos.x, targetPos.y, 'imp_firebolt');
+              this.spawnImpactEffect(targetPos.x, targetPos.y, 'imp_firebolt');
+            }
           } else {
             // Check enemies
             for (const room of state.dungeon.rooms) {
@@ -5527,8 +5567,8 @@ export class GameScene extends Phaser.Scene {
 
       }
 
-      // Spawn projectile/effect for ranged attacks/spells (skip chain lightning - has custom effect)
-      if (event.damage && sourcePos.x !== 0 && targetPos.x !== 0 && event.abilityId !== 'shaman_chainlight') {
+      // Spawn projectile/effect for ranged attacks/spells (skip chain lightning - has custom effect, skip pets - handled above)
+      if (event.damage && sourcePos.x !== 0 && targetPos.x !== 0 && event.abilityId !== 'shaman_chainlight' && !sourceIsPet) {
         const dx = targetPos.x - sourcePos.x;
         const dy = targetPos.y - sourcePos.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -5591,6 +5631,10 @@ export class GameScene extends Phaser.Scene {
       if (event.abilityId === 'warlock_drain' && event.heal && sourcePos.x !== 0 && targetPos.x !== 0) {
         this.spawnDrainLifeEffect(sourcePos.x, sourcePos.y, targetPos.x, targetPos.y);
       }
+    } else if (message.type === 'TAUNT_EVENT') {
+      // Imp taunt visual effect
+      const event = message.event;
+      this.playTauntEffect(event.sourcePosition.x, event.sourcePosition.y, event.targetIds);
     } else if (message.type === 'LOOT_DROP') {
       // Play loot sound
       this.playSfx('sfxLoot');
@@ -6419,8 +6463,8 @@ export class GameScene extends Phaser.Scene {
   private getSpellColors(abilityId?: string): { primary: number; secondary: number; size: number } {
     if (!abilityId) return { primary: 0xccaa44, secondary: 0xffdd88, size: 6 };
 
-    // Fire spells - orange/red
-    if (abilityId.includes('fire') || abilityId.includes('flame') || abilityId.includes('inferno') || abilityId.includes('blaze') || abilityId.includes('pyro')) {
+    // Fire spells - orange/red (includes Imp fire attacks and Hellfire)
+    if (abilityId.includes('fire') || abilityId.includes('flame') || abilityId.includes('inferno') || abilityId.includes('blaze') || abilityId.includes('pyro') || abilityId.includes('imp_') || abilityId.includes('hellfire')) {
       return { primary: 0xff4400, secondary: 0xffaa00, size: 7 };
     }
     // Frost/ice spells - blue/cyan
@@ -6663,6 +6707,90 @@ export class GameScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => healGlow.destroy()
     });
+  }
+
+  private playTauntEffect(sourceX: number, sourceY: number, targetIds: string[]): void {
+    // Expanding taunt shockwave ring from the Imp
+    const tauntRing = this.add.circle(sourceX, sourceY, 10, 0xff6600, 0.8).setDepth(52);
+    tauntRing.setStrokeStyle(3, 0xff4400, 1);
+
+    this.tweens.add({
+      targets: tauntRing,
+      radius: 80,
+      alpha: 0,
+      duration: 500,
+      ease: 'Cubic.easeOut',
+      onComplete: () => tauntRing.destroy()
+    });
+
+    // Second inner ring for emphasis
+    const innerRing = this.add.circle(sourceX, sourceY, 5, 0xffaa00, 0.6).setDepth(52);
+    this.tweens.add({
+      targets: innerRing,
+      radius: 50,
+      alpha: 0,
+      duration: 400,
+      ease: 'Cubic.easeOut',
+      onComplete: () => innerRing.destroy()
+    });
+
+    // "TAUNT" text floating up from the Imp
+    const tauntText = this.add.text(sourceX, sourceY - 10, 'TAUNT', {
+      fontSize: '14px',
+      color: '#ff6600',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3
+    }).setOrigin(0.5).setDepth(55);
+
+    this.tweens.add({
+      targets: tauntText,
+      y: sourceY - 40,
+      alpha: 0,
+      duration: 800,
+      ease: 'Cubic.easeOut',
+      onComplete: () => tauntText.destroy()
+    });
+
+    // Draw aggro lines from taunted enemies to the Imp
+    const state = wsClient.currentState;
+    if (state) {
+      const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+      if (currentRoom) {
+        for (const targetId of targetIds) {
+          const enemy = currentRoom.enemies.find(e => e.id === targetId);
+          if (enemy && enemy.isAlive) {
+            // Draw a brief red line from enemy to Imp
+            const aggroLine = this.add.graphics().setDepth(48);
+            aggroLine.lineStyle(2, 0xff4400, 0.8);
+            aggroLine.beginPath();
+            aggroLine.moveTo(enemy.position.x, enemy.position.y);
+            aggroLine.lineTo(sourceX, sourceY);
+            aggroLine.strokePath();
+
+            // Fade out the line
+            this.tweens.add({
+              targets: aggroLine,
+              alpha: 0,
+              duration: 600,
+              ease: 'Cubic.easeOut',
+              onComplete: () => aggroLine.destroy()
+            });
+
+            // Small burst at enemy position
+            const enemyBurst = this.add.circle(enemy.position.x, enemy.position.y, 8, 0xff4400, 0.6).setDepth(51);
+            this.tweens.add({
+              targets: enemyBurst,
+              radius: 15,
+              alpha: 0,
+              duration: 400,
+              ease: 'Cubic.easeOut',
+              onComplete: () => enemyBurst.destroy()
+            });
+          }
+        }
+      }
+    }
   }
 
   private spawnBlindEffect(x: number, y: number): void {

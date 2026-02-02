@@ -66,7 +66,7 @@ export class AbilitySystem {
       case 'warrior_bloodlust': {
         const healPercent = 15 + rank * 5; // 20/25/30/35/40%
         const duration = 8 + rank * 2; // 10/12/14/16/18s
-        return `Enter a bloodlust frenzy for ${duration}s. Heal for ${healPercent}% of damage dealt.`;
+        return `Enter a bloodlust frenzy for ${duration}s. Heal for ${healPercent}% of damage dealt.\nEnables Whirlwind combo!`;
       }
       case 'rogue_blind': {
         const duration = 6 + rank * 2; // 8/10/12/14/16s
@@ -87,11 +87,43 @@ export class AbilitySystem {
       }
       case 'paladin_judgment': {
         const stunDuration = 1 + rank; // 2/3/4/5/6s
-        return `Call down holy judgment on all enemies in the room, dealing damage and stunning them for ${stunDuration} seconds.`;
+        return `Call down holy judgment on all enemies in the room, dealing damage and stunning them for ${stunDuration} seconds.\nEnables Crusader Strike combo!`;
       }
       case 'paladin_retribution': {
         const reflectDamage = 5 + rank * 5; // 10/15/20/25/30
         return `Activate a holy aura that damages all enemies who attack you for ${reflectDamage} damage.`;
+      }
+      case 'mage_pyroblast': {
+        return `Massive fireball that stuns the target for 3 seconds.\nEnables Fireball and Blaze combos!`;
+      }
+      case 'warlock_hellfire': {
+        return `Burn all nearby enemies with demonic fire. Leaves them burning for additional damage.\nEnables Drain Life combo!`;
+      }
+      case 'paladin_strike': {
+        return `A holy-infused melee attack.\nCOMBO: +50% damage and 30% self-heal on Judgment-stunned targets!`;
+      }
+      case 'warrior_whirlwind': {
+        return `Spin and hit all nearby enemies with devastating force.\nCOMBO: +25% healing during Bloodlust!`;
+      }
+      case 'mage_fireball': {
+        return `Hurl a ball of fire at the enemy.\nCOMBO: +50% damage on Pyroblast-stunned targets!`;
+      }
+      case 'mage_blaze': {
+        const damageBonus = (rank - 1) * 15;
+        return `Fire bounces between enemies, hitting up to 5 targets.${damageBonus > 0 ? ` +${damageBonus}% damage.` : ''}\nCOMBO: Stuns all enemies if primary target is Pyroblast-stunned!`;
+      }
+      case 'warlock_drain': {
+        return `Drain health from target, healing yourself and your Imp (50%).\nCOMBO: Drains ALL burning enemies if target has Hellfire!`;
+      }
+      case 'warlock_summon_imp': {
+        // Calculate Imp stats based on floor and rank
+        const floor = wsClient.currentState?.floor ?? 1;
+        const rankBonus = 1 + (rank - 1) * 0.1; // 10% per rank
+        const baseHealth = 100 + floor * 10;
+        const baseSpell = 12 + floor * 3;
+        const impHealth = Math.round(baseHealth * rankBonus);
+        const impDamage = Math.round(baseSpell * rankBonus);
+        return `Summon a demonic imp that attacks with fire magic and taunts nearby foes every 5s.\nImp HP: ${impHealth} | Damage: ${impDamage}`;
       }
       default:
         return this.abilityData.get(abilityId)?.description ?? '';

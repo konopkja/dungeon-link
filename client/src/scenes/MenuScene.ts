@@ -24,7 +24,7 @@ interface ClassDisplayData {
   abilities: string[];
 }
 
-// Only includes data for AVAILABLE_CLASSES - unfinished classes are commented out below
+// Class data for display in character selection
 const CLASS_DATA: Partial<Record<ClassName, ClassDisplayData>> = {
   [ClassName.Warrior]: {
     name: 'Warrior',
@@ -40,14 +40,6 @@ const CLASS_DATA: Partial<Record<ClassName, ClassDisplayData>> = {
     stats: { health: 140, mana: 80, attackPower: 12, spellPower: 8, armor: 24, crit: 5 },
     abilities: ['Crusader Strike', 'Flash of Light', 'Judgment', 'Blessing of Protection', 'Retribution Aura']
   },
-  // UNFINISHED CLASS - Hidden from UI until assets and abilities are complete
-  // [ClassName.Hunter]: {
-  //   name: 'Hunter',
-  //   role: 'Ranged DPS',
-  //   description: 'A master of ranged combat and wilderness survival. Hunters rain arrows upon their foes from a safe distance with deadly precision.',
-  //   stats: { health: 90, mana: 70, attackPower: 14, spellPower: 0, armor: 10, crit: 10 },
-  //   abilities: ['Arcane Shot', 'Multi-Shot', 'Aimed Shot', 'Explosive Trap', 'Aspect of the Hawk']
-  // },
   [ClassName.Rogue]: {
     name: 'Rogue',
     role: 'Melee DPS / Assassin',
@@ -55,14 +47,6 @@ const CLASS_DATA: Partial<Record<ClassName, ClassDisplayData>> = {
     stats: { health: 85, mana: 60, attackPower: 16, spellPower: 0, armor: 8, crit: 15 },
     abilities: ['Sinister Strike', 'Stealth', 'Blind', 'Vanish', 'Blade Flurry']
   },
-  // UNFINISHED CLASS - Hidden from UI until assets and abilities are complete
-  // [ClassName.Priest]: {
-  //   name: 'Priest',
-  //   role: 'Healer / Caster',
-  //   description: 'A devoted healer wielding holy and shadow magic. Priests can mend wounds with light or inflict pain with darkness.',
-  //   stats: { health: 75, mana: 120, attackPower: 0, spellPower: 15, armor: 5, crit: 5 },
-  //   abilities: ['Smite', 'Heal', 'Shadow Word: Pain', 'Power Word: Shield', 'Holy Nova']
-  // },
   [ClassName.Shaman]: {
     name: 'Shaman',
     role: 'Caster / Healer Hybrid',
@@ -83,15 +67,7 @@ const CLASS_DATA: Partial<Record<ClassName, ClassDisplayData>> = {
     description: 'A dark caster wielding shadow magic and demonic forces. Warlocks can cheat death with Soulstone, summon demons, drain life, and unleash Hellfire.',
     stats: { health: 80, mana: 110, attackPower: 0, spellPower: 16, armor: 5, crit: 8 },
     abilities: ['Shadow Bolt', 'Soulstone', 'Summon Imp', 'Drain Life', 'Hellfire']
-  },
-  // UNFINISHED CLASS - Hidden from UI until assets and abilities are complete
-  // [ClassName.Druid]: {
-  //   name: 'Druid',
-  //   role: 'Hybrid Caster / Healer',
-  //   description: 'A versatile nature caster attuned to the wild. Druids deal damage with Wrath and Moonfire, heal with Rejuvenation and Regrowth, and Swipe enemies in melee.',
-  //   stats: { health: 90, mana: 100, attackPower: 10, spellPower: 10, armor: 10, crit: 8 },
-  //   abilities: ['Wrath', 'Rejuvenation', 'Moonfire', 'Swipe', 'Regrowth']
-  // }
+  }
 };
 
 const AVAILABLE_CLASSES: ClassName[] = [
@@ -420,13 +396,10 @@ export class MenuScene extends Phaser.Scene {
     const colors: Record<ClassName, string> = {
       [ClassName.Warrior]: '#C79C6E',
       [ClassName.Paladin]: '#F58CBA',
-      [ClassName.Hunter]: '#ABD473',
       [ClassName.Rogue]: '#FFF569',
-      [ClassName.Priest]: '#FFFFFF',
       [ClassName.Shaman]: '#0070DE',
       [ClassName.Mage]: '#69CCF0',
-      [ClassName.Warlock]: '#9482C9',
-      [ClassName.Druid]: '#FF7D0A'
+      [ClassName.Warlock]: '#9482C9'
     };
     return colors[className] || '#ffd700';
   }

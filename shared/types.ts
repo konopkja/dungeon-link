@@ -5,13 +5,10 @@
 export enum ClassName {
   Warrior = 'warrior',
   Paladin = 'paladin',
-  Hunter = 'hunter',
   Rogue = 'rogue',
-  Priest = 'priest',
   Shaman = 'shaman',
   Mage = 'mage',
-  Warlock = 'warlock',
-  Druid = 'druid'
+  Warlock = 'warlock'
 }
 
 export enum EquipSlot {
@@ -600,6 +597,7 @@ export type ServerMessage =
   | { type: 'JOIN_ERROR'; message: string }
   | { type: 'STATE_UPDATE'; state: RunState }
   | { type: 'COMBAT_EVENT'; event: CombatEvent }
+  | { type: 'TAUNT_EVENT'; event: TauntEvent }
   | { type: 'LOOT_DROP'; loot: LootDrop[] }
   | { type: 'FLOOR_COMPLETE'; floor: number }
   | { type: 'PLAYER_JOINED'; player: Player }
@@ -635,6 +633,12 @@ export interface CombatEvent {
   isStealthAttack?: boolean;
   killed?: boolean;
   blocked?: number; // Amount of damage blocked by Shield Wall or similar effects
+}
+
+export interface TauntEvent {
+  sourceId: string; // The pet doing the taunt
+  sourcePosition: Position;
+  targetIds: string[]; // All enemies taunted
 }
 
 // ============================================

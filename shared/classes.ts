@@ -20,12 +20,12 @@ export const CLASSES: ClassDefinition[] = [
         cooldown: 0, manaCost: 10, baseDamage: 25, range: 50, isBaseline: true
       },
       {
-        id: 'warrior_bloodlust', name: 'Bloodlust', description: 'Enter a bloodthirsty rage, healing for a percentage of damage dealt. Duration and healing % scale with rank.',
+        id: 'warrior_bloodlust', name: 'Bloodlust', description: 'Enter a bloodthirsty rage, healing for a percentage of damage dealt. Duration and healing % scale with rank. Enables Whirlwind combo!',
         classId: ClassName.Warrior, type: AbilityType.Buff, targetType: TargetType.Self,
         cooldown: 60, manaCost: 5, range: 0, isBaseline: true
       },
       {
-        id: 'warrior_whirlwind', name: 'Whirlwind', description: 'Spin and hit all nearby enemies with devastating force.',
+        id: 'warrior_whirlwind', name: 'Whirlwind', description: 'Spin and hit all nearby enemies with devastating force. COMBO: 25% bonus healing during Bloodlust!',
         classId: ClassName.Warrior, type: AbilityType.Damage, targetType: TargetType.AoE,
         cooldown: 6, manaCost: 25, baseDamage: 60, range: 80, isBaseline: false
       },
@@ -56,7 +56,7 @@ export const CLASSES: ClassDefinition[] = [
     },
     abilities: [
       {
-        id: 'paladin_strike', name: 'Crusader Strike', description: 'A holy-infused melee attack.',
+        id: 'paladin_strike', name: 'Crusader Strike', description: 'A holy-infused melee attack. COMBO: 50% bonus damage and 30% self-heal on Judgment-stunned targets!',
         classId: ClassName.Paladin, type: AbilityType.Damage, targetType: TargetType.Enemy,
         cooldown: 0, manaCost: 12, baseDamage: 22, range: 50, isBaseline: true
       },
@@ -66,7 +66,7 @@ export const CLASSES: ClassDefinition[] = [
         cooldown: 2, manaCost: 20, baseHeal: 30, range: 200, isBaseline: true
       },
       {
-        id: 'paladin_judgment', name: 'Judgment', description: 'Call down holy judgment on all enemies in the room, dealing damage and stunning them. Stun duration scales with rank.',
+        id: 'paladin_judgment', name: 'Judgment', description: 'Call down holy judgment on all enemies in the room, dealing damage and stunning them. Stun duration scales with rank. Enables Crusader Strike combo!',
         classId: ClassName.Paladin, type: AbilityType.Damage, targetType: TargetType.AoE,
         cooldown: 40, manaCost: 10, baseDamage: 20, range: 400, isBaseline: false
       },
@@ -79,47 +79,6 @@ export const CLASSES: ClassDefinition[] = [
         id: 'paladin_retribution', name: 'Retribution Aura', description: 'Activate a holy aura that damages all enemies who attack you. Damage scales with rank.',
         classId: ClassName.Paladin, type: AbilityType.Buff, targetType: TargetType.Self,
         cooldown: 0, manaCost: 0, baseDamage: 10, range: 0, isBaseline: false
-      }
-    ]
-  },
-
-  // ============================================
-  // HUNTER - Ranged physical damage, pets
-  // ============================================
-  {
-    id: ClassName.Hunter,
-    name: 'Hunter',
-    description: 'A master of ranged combat and beast companions.',
-    color: '#abd473',
-    baseStats: {
-      health: 90, maxHealth: 90, mana: 70, maxMana: 70,
-      attackPower: 14, spellPower: 0, armor: 10, crit: 10, haste: 5, lifesteal: 0, resist: 5
-    },
-    abilities: [
-      {
-        id: 'hunter_shot', name: 'Arcane Shot', description: 'Fire an arcane-infused arrow.',
-        classId: ClassName.Hunter, type: AbilityType.Damage, targetType: TargetType.Enemy,
-        cooldown: 0, manaCost: 10, baseDamage: 20, range: 350, isBaseline: true
-      },
-      {
-        id: 'hunter_multishot', name: 'Multi-Shot', description: 'Fire arrows at multiple enemies.',
-        classId: ClassName.Hunter, type: AbilityType.Damage, targetType: TargetType.AoE,
-        cooldown: 6, manaCost: 20, baseDamage: 15, range: 300, isBaseline: true
-      },
-      {
-        id: 'hunter_aimed', name: 'Aimed Shot', description: 'A carefully aimed shot dealing high damage.',
-        classId: ClassName.Hunter, type: AbilityType.Damage, targetType: TargetType.Enemy,
-        cooldown: 8, manaCost: 25, baseDamage: 40, range: 400, isBaseline: false
-      },
-      {
-        id: 'hunter_trap', name: 'Explosive Trap', description: 'Place a trap that explodes when triggered.',
-        classId: ClassName.Hunter, type: AbilityType.Damage, targetType: TargetType.Ground,
-        cooldown: 15, manaCost: 25, baseDamage: 35, range: 100, isBaseline: false
-      },
-      {
-        id: 'hunter_aspect', name: 'Aspect of the Hawk', description: 'Increase attack power.',
-        classId: ClassName.Hunter, type: AbilityType.Buff, targetType: TargetType.Self,
-        cooldown: 0, manaCost: 15, range: 0, isBaseline: false
       }
     ]
   },
@@ -161,47 +120,6 @@ export const CLASSES: ClassDefinition[] = [
         id: 'rogue_bladeflurry', name: 'Blade Flurry', description: 'Double your attack speed and hit an additional nearby target with each attack.',
         classId: ClassName.Rogue, type: AbilityType.Buff, targetType: TargetType.Self,
         cooldown: 20, manaCost: 5, range: 0, isBaseline: false
-      }
-    ]
-  },
-
-  // ============================================
-  // PRIEST - Healer, holy/shadow magic
-  // ============================================
-  {
-    id: ClassName.Priest,
-    name: 'Priest',
-    description: 'A master of holy and shadow magic.',
-    color: '#ffffff',
-    baseStats: {
-      health: 75, maxHealth: 75, mana: 120, maxMana: 120,
-      attackPower: 0, spellPower: 15, armor: 5, crit: 5, haste: 5, lifesteal: 0, resist: 15
-    },
-    abilities: [
-      {
-        id: 'priest_smite', name: 'Smite', description: 'Blast an enemy with holy light.',
-        classId: ClassName.Priest, type: AbilityType.Damage, targetType: TargetType.Enemy,
-        cooldown: 0, manaCost: 12, baseDamage: 22, range: 300, isBaseline: true
-      },
-      {
-        id: 'priest_heal', name: 'Heal', description: 'Restore health to an ally.',
-        classId: ClassName.Priest, type: AbilityType.Heal, targetType: TargetType.Ally,
-        cooldown: 2, manaCost: 25, baseHeal: 40, range: 250, isBaseline: true
-      },
-      {
-        id: 'priest_shadowword', name: 'Shadow Word: Pain', description: 'Afflict the target with shadow damage over time.',
-        classId: ClassName.Priest, type: AbilityType.Debuff, targetType: TargetType.Enemy,
-        cooldown: 8, manaCost: 20, baseDamage: 30, range: 300, isBaseline: false
-      },
-      {
-        id: 'priest_shield', name: 'Power Word: Shield', description: 'Shield an ally absorbing damage.',
-        classId: ClassName.Priest, type: AbilityType.Buff, targetType: TargetType.Ally,
-        cooldown: 12, manaCost: 5, baseHeal: 35, range: 250, isBaseline: false
-      },
-      {
-        id: 'priest_holynova', name: 'Holy Nova', description: 'Burst of holy energy damaging enemies and healing allies.',
-        classId: ClassName.Priest, type: AbilityType.Damage, targetType: TargetType.AoE,
-        cooldown: 10, manaCost: 35, baseDamage: 18, baseHeal: 15, range: 120, isBaseline: false
       }
     ]
   },
@@ -261,7 +179,7 @@ export const CLASSES: ClassDefinition[] = [
     },
     abilities: [
       {
-        id: 'mage_fireball', name: 'Fireball', description: 'Hurl a ball of fire at the enemy.',
+        id: 'mage_fireball', name: 'Fireball', description: 'Hurl a ball of fire at the enemy. COMBO: 50% bonus damage on Pyroblast-stunned targets!',
         classId: ClassName.Mage, type: AbilityType.Damage, targetType: TargetType.Enemy,
         cooldown: 0, manaCost: 15, baseDamage: 30, range: 350, isBaseline: true
       },
@@ -271,12 +189,12 @@ export const CLASSES: ClassDefinition[] = [
         cooldown: 120, manaCost: 0, range: 0, isBaseline: true
       },
       {
-        id: 'mage_blaze', name: 'Blaze', description: 'Fire that bounces between enemies, hitting up to 5 targets. Damage increases with rank.',
+        id: 'mage_blaze', name: 'Blaze', description: 'Fire that bounces between enemies, hitting up to 5 targets. Damage increases with rank. COMBO: Stuns all enemies if primary target is Pyroblast-stunned!',
         classId: ClassName.Mage, type: AbilityType.Damage, targetType: TargetType.Enemy,
         cooldown: 60, manaCost: 10, baseDamage: 25, range: 350, isBaseline: false
       },
       {
-        id: 'mage_pyroblast', name: 'Pyroblast', description: 'Massive fireball that stuns the target for 3 seconds.',
+        id: 'mage_pyroblast', name: 'Pyroblast', description: 'Massive fireball that stuns the target for 3 seconds. Enables Fireball and Blaze combos!',
         classId: ClassName.Mage, type: AbilityType.Damage, targetType: TargetType.Enemy,
         cooldown: 15, manaCost: 10, baseDamage: 60, range: 350, isBaseline: false
       },
@@ -312,63 +230,23 @@ export const CLASSES: ClassDefinition[] = [
         cooldown: 600, manaCost: 5, range: 0, isBaseline: true
       },
       {
-        id: 'warlock_summon_imp', name: 'Summon Imp', description: 'Summon a demonic imp that attacks enemies and taunts.',
+        id: 'warlock_summon_imp', name: 'Summon Imp', description: 'Summon a demonic imp that attacks enemies with fire magic and taunts nearby foes every 5s.',
         classId: ClassName.Warlock, type: AbilityType.Summon, targetType: TargetType.Self,
         cooldown: 30, manaCost: 25, baseDamage: 0, range: 0, isBaseline: false
       },
       {
-        id: 'warlock_drain', name: 'Drain Life', description: 'Drain health from target, healing yourself.',
+        id: 'warlock_drain', name: 'Drain Life', description: 'Drain health from target, healing yourself and your Imp. COMBO: Drains all burning enemies if target has Hellfire!',
         classId: ClassName.Warlock, type: AbilityType.Damage, targetType: TargetType.Enemy,
         cooldown: 30, manaCost: 5, baseDamage: 20, baseHeal: 20, range: 250, isBaseline: false
       },
       {
-        id: 'warlock_hellfire', name: 'Hellfire', description: 'Burn all nearby enemies with demonic fire. Leaves them burning for additional damage.',
+        id: 'warlock_hellfire', name: 'Hellfire', description: 'Burn all nearby enemies with demonic fire. Leaves them burning for additional damage. Enables Drain Life combo!',
         classId: ClassName.Warlock, type: AbilityType.Damage, targetType: TargetType.AoE,
         cooldown: 15, manaCost: 10, baseDamage: 25, range: 100, isBaseline: false
       }
     ]
   },
 
-  // ============================================
-  // DRUID - Shapeshifter, versatile healer/damage
-  // ============================================
-  {
-    id: ClassName.Druid,
-    name: 'Druid',
-    description: 'A shapeshifter who commands nature magic.',
-    color: '#ff7d0a',
-    baseStats: {
-      health: 90, maxHealth: 90, mana: 100, maxMana: 100,
-      attackPower: 10, spellPower: 10, armor: 10, crit: 8, haste: 5, lifesteal: 0, resist: 10
-    },
-    abilities: [
-      {
-        id: 'druid_wrath', name: 'Wrath', description: 'Hurl nature energy at the enemy.',
-        classId: ClassName.Druid, type: AbilityType.Damage, targetType: TargetType.Enemy,
-        cooldown: 0, manaCost: 12, baseDamage: 24, range: 300, isBaseline: true
-      },
-      {
-        id: 'druid_rejuv', name: 'Rejuvenation', description: 'Heal an ally over time.',
-        classId: ClassName.Druid, type: AbilityType.Heal, targetType: TargetType.Ally,
-        cooldown: 0, manaCost: 20, baseHeal: 35, range: 250, isBaseline: true
-      },
-      {
-        id: 'druid_moonfire', name: 'Moonfire', description: 'Burn the enemy with lunar energy.',
-        classId: ClassName.Druid, type: AbilityType.Damage, targetType: TargetType.Enemy,
-        cooldown: 4, manaCost: 15, baseDamage: 28, range: 300, isBaseline: false
-      },
-      {
-        id: 'druid_swipe', name: 'Swipe', description: 'Swipe at nearby enemies in bear form.',
-        classId: ClassName.Druid, type: AbilityType.Damage, targetType: TargetType.AoE,
-        cooldown: 6, manaCost: 20, baseDamage: 18, range: 80, isBaseline: false
-      },
-      {
-        id: 'druid_regrowth', name: 'Regrowth', description: 'Powerful heal with a HoT component.',
-        classId: ClassName.Druid, type: AbilityType.Heal, targetType: TargetType.Ally,
-        cooldown: 8, manaCost: 35, baseHeal: 50, range: 250, isBaseline: false
-      }
-    ]
-  }
 ];
 
 export function getClassById(id: ClassName): ClassDefinition | undefined {

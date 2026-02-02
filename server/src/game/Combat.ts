@@ -147,6 +147,23 @@ export function processAbilityCast(
         caster.buffs = caster.buffs.filter(b => b.icon !== 'rogue_stealth');
       }
 
+      // COMBO: Pyroblast + Fireball - 50% extra damage on stunned targets
+      const hasPyroStun = 'debuffs' in targetEntity &&
+        targetEntity.debuffs.some(d => d.abilityId === 'mage_pyroblast' && d.remainingDuration > 0);
+      if (hasPyroStun && abilityId === 'mage_fireball') {
+        totalDamage = Math.round(totalDamage * 1.5); // 50% bonus damage
+        console.log(`[DEBUG] Fireball COMBO! Target stunned by Pyroblast - 50% bonus damage: ${totalDamage}`);
+      }
+
+      // COMBO: Judgment + Crusader Strike - 50% extra damage + 30% self heal
+      const hasJudgmentStun = 'debuffs' in targetEntity &&
+        targetEntity.debuffs.some(d => d.abilityId === 'paladin_judgment' && d.remainingDuration > 0);
+      let judgmentComboHeal = 0;
+      if (hasJudgmentStun && abilityId === 'paladin_strike') {
+        totalDamage = Math.round(totalDamage * 1.5); // 50% bonus damage
+        console.log(`[DEBUG] Crusader Strike COMBO! Target stunned by Judgment - 50% bonus damage: ${totalDamage}`);
+      }
+
       // Apply armor/resist reduction
       const armor = caster.stats.spellPower > caster.stats.attackPower
         ? targetEntity.stats.resist
@@ -174,6 +191,13 @@ export function processAbilityCast(
         caster.stats.health = Math.min(caster.stats.maxHealth, caster.stats.health + healAmount);
       }
 
+      // COMBO: Judgment + Crusader Strike self-heal (30% of damage dealt)
+      if (hasJudgmentStun && abilityId === 'paladin_strike') {
+        judgmentComboHeal = Math.round(finalDamage * 0.3);
+        caster.stats.health = Math.min(caster.stats.maxHealth, caster.stats.health + judgmentComboHeal);
+        console.log(`[DEBUG] Crusader Strike COMBO! Self-heal: ${judgmentComboHeal}`);
+      }
+
       // Special handling for Drain Life - heals caster based on damage dealt
       let drainHealAmount = 0;
       if (ability.baseHeal && ability.baseHeal > 0) {
@@ -183,12 +207,15 @@ export function processAbilityCast(
         console.log(`[DEBUG] Drain Life healed caster for ${drainHealAmount}`);
       }
 
+      // Calculate total heal to show (Drain Life or Judgment combo)
+      const totalHealToShow = drainHealAmount > 0 ? drainHealAmount : (judgmentComboHeal > 0 ? judgmentComboHeal : undefined);
+
       events.push({
         sourceId: caster.id,
         targetId: targetEntity.id,
         abilityId,
         damage: finalDamage,
-        heal: drainHealAmount > 0 ? drainHealAmount : undefined, // Include heal for animation
+        heal: totalHealToShow,
         isCrit,
         isStealthAttack,
         killed: targetDied
@@ -266,10 +293,8 @@ export function processAbilityCast(
         'warrior_bloodlust': 8 + rank * 2, // Bloodlust - 8/10/12/14/16s duration, heal scales with rank
         'warrior_retaliation': 10,  // Retaliation - reflect damage
         'warlock_soulstone': 10,    // Soulstone - resurrect on death
-        'priest_shield': 10,        // Power Word: Shield
         'mage_ice_barrier': 8,      // Ice Barrier
         'mage_iceblock': 5,         // Ice Block
-        'hunter_aspect': 15,        // Aspect of the Pack
         'rogue_evasion': 6,         // Evasion
         'rogue_bladeflurry': 15,    // Blade Flurry
         'rogue_vanish': 4 + rank,   // Vanish - 4/5/6/7/8s stealth, drop aggro
@@ -304,15 +329,7 @@ export function processAbilityCast(
         maxDuration: duration,
         isDebuff: false,
         stacks: abilityId === 'shaman_ancestral' ? (2 + rank) : undefined, // Ancestral Spirit: 3/4/5/6/7 charges
-        rank, // Store rank for effects that scale (like Bloodlust healing)
-        // Power Word: Shield - absorbs damage based on baseHeal and spell power
-        shieldAmount: abilityId === 'priest_shield'
-          ? Math.round((ability.baseHeal ?? 35) * (1 + (rank - 1) * 0.15) + caster.stats.spellPower * 0.5)
-          : undefined,
-        // Aspect of the Hawk - increases attack power
-        statModifiers: abilityId === 'hunter_aspect'
-          ? { attackPower: Math.round(10 + rank * 5 + caster.stats.attackPower * 0.2) } // +10/15/20/25/30 + 20% of AP
-          : undefined
+        rank // Store rank for effects that scale (like Bloodlust healing)
       };
 
       // Remove existing buff of same ability if present (refresh duration)
@@ -349,36 +366,6 @@ export function processAbilityCast(
           // Remove existing blind if present and add new one
           targetEntity.debuffs = targetEntity.debuffs.filter(d => d.abilityId !== 'rogue_blind');
           targetEntity.debuffs.push(blindDebuff);
-        }
-        // Handle Shadow Word: Pain (priest_shadowword) - DoT
-        else if (abilityId === 'priest_shadowword') {
-          const dotDebuff = {
-            id: `swp_${Date.now()}`,
-            sourceId: caster.id,
-            abilityId: 'priest_shadowword',
-            name: 'Shadow Word: Pain',
-            damagePerTick: Math.round((ability.baseDamage ?? 30) * (1 + (rank - 1) * 0.1) / 5), // 5 ticks over 10 sec
-            tickInterval: 2,
-            remainingDuration: 10,
-            lastTickTime: Date.now() / 1000
-          };
-          targetEntity.debuffs = targetEntity.debuffs.filter(d => d.abilityId !== 'priest_shadowword');
-          targetEntity.debuffs.push(dotDebuff);
-        }
-        // Handle Curse of Agony (warlock_agony) - escalating DoT
-        else if (abilityId === 'warlock_agony') {
-          const dotDebuff = {
-            id: `coa_${Date.now()}`,
-            sourceId: caster.id,
-            abilityId: 'warlock_agony',
-            name: 'Curse of Agony',
-            damagePerTick: Math.round((ability.baseDamage ?? 40) * (1 + (rank - 1) * 0.1) / 5),
-            tickInterval: 2,
-            remainingDuration: 10,
-            lastTickTime: Date.now() / 1000
-          };
-          targetEntity.debuffs = targetEntity.debuffs.filter(d => d.abilityId !== 'warlock_agony');
-          targetEntity.debuffs.push(dotDebuff);
         }
       }
 
@@ -550,31 +537,6 @@ export function processEnemyAttack(
   const result = processBasicAttack(enemy, target, enemy.type === 'caster');
 
   // Check for Power Word: Shield - absorbs damage before health
-  const pwsBuffIndex = target.buffs.findIndex(b => b.icon === 'priest_shield' && (b.shieldAmount ?? 0) > 0);
-  if (pwsBuffIndex >= 0 && result.events.length > 0 && result.events[0].damage) {
-    const pwsBuff = target.buffs[pwsBuffIndex];
-    const damage = result.events[0].damage;
-    const shieldAmount = pwsBuff.shieldAmount ?? 0;
-
-    if (shieldAmount >= damage) {
-      // Shield absorbs all damage
-      pwsBuff.shieldAmount = shieldAmount - damage;
-      target.stats.health = Math.min(target.stats.maxHealth, target.stats.health + damage);
-      result.events[0].blocked = damage;
-      result.events[0].damage = 0;
-      console.log(`[DEBUG] Power Word: Shield absorbed ${damage} damage, ${pwsBuff.shieldAmount} shield remaining`);
-    } else {
-      // Shield partially absorbs damage
-      const remainingDamage = damage - shieldAmount;
-      target.stats.health = Math.min(target.stats.maxHealth, target.stats.health + shieldAmount);
-      result.events[0].blocked = shieldAmount;
-      result.events[0].damage = remainingDamage;
-      // Remove depleted shield
-      target.buffs.splice(pwsBuffIndex, 1);
-      console.log(`[DEBUG] Power Word: Shield absorbed ${shieldAmount} damage, shield depleted`);
-    }
-  }
-
   // Check for Shield Wall buff - reduces all damage by 50%
   const hasShieldWall = target.buffs.some(b => b.icon === 'warrior_shield');
   if (hasShieldWall && result.events.length > 0 && result.events[0].damage) {

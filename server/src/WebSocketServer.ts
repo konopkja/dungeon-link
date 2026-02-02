@@ -337,7 +337,7 @@ export class GameWebSocketServer {
     this.updateInterval = setInterval(() => {
       const updates = gameStateManager.update();
 
-      for (const [runId, { state, events, collectedItems }] of updates) {
+      for (const [runId, { state, events, tauntEvents, collectedItems }] of updates) {
         // Broadcast state update
         this.broadcastToRun(runId, {
           type: 'STATE_UPDATE',
@@ -348,6 +348,14 @@ export class GameWebSocketServer {
         for (const event of events) {
           this.broadcastToRun(runId, {
             type: 'COMBAT_EVENT',
+            event
+          });
+        }
+
+        // Broadcast taunt events
+        for (const event of tauntEvents) {
+          this.broadcastToRun(runId, {
+            type: 'TAUNT_EVENT',
             event
           });
         }

@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import {
   RunState, Player, ClassName, Equipment, EquipSlot, Rarity, Buff,
-  PlayerInput, CombatEvent, LootDrop, Position, Enemy, PotionType, Pet, AbilityType,
+  PlayerInput, CombatEvent, TauntEvent, LootDrop, Position, Enemy, PotionType, Pet, AbilityType,
   GroundEffect, GroundEffectType, SaveData, VendorService, TargetType, GroundItem,
   Trap, Chest, TrapType, FloorTheme, EnemyType, createRunTracking
 } from '@dungeon-link/shared';
@@ -379,6 +379,32 @@ export class GameStateManager {
           }
           console.log(`[DEBUG] AoE hit ${hitCount} enemies`);
 
+          // Bloodlust healing for AoE abilities
+          const bloodlustBuffAoE = player.buffs.find(b => b.icon === 'warrior_bloodlust');
+          if (bloodlustBuffAoE) {
+            const totalAoEDamage = events.reduce((sum, e) => sum + (e.damage || 0), 0);
+            if (totalAoEDamage > 0) {
+              const buffRank = bloodlustBuffAoE.rank ?? 1;
+              let healPercent = 0.15 + buffRank * 0.05; // 20/25/30/35/40%
+
+              // COMBO: Bloodlust + Whirlwind - 25% extra healing
+              if (input.castAbility === 'warrior_whirlwind') {
+                healPercent *= 1.25; // 25% bonus
+                console.log(`[DEBUG] Whirlwind COMBO! Bloodlust healing increased by 25%`);
+              }
+
+              const healAmount = Math.round(totalAoEDamage * healPercent);
+              player.stats.health = Math.min(player.stats.maxHealth, player.stats.health + healAmount);
+              events.push({
+                sourceId: player.id,
+                targetId: player.id,
+                heal: healAmount,
+                abilityId: 'warrior_bloodlust'
+              });
+              console.log(`[DEBUG] AoE Bloodlust healed for ${healAmount} (${hitCount} targets hit)`);
+            }
+          }
+
           // Auto-target after AoE if any enemies died
           this.autoTargetClosestEnemy(state, player, currentRoom);
         }
@@ -416,6 +442,91 @@ export class GameStateManager {
               heal: healAmount,
               abilityId: 'warrior_bloodlust'
             });
+          }
+        }
+
+        // WARLOCK COMBO: Drain Life also heals the player's Imp
+        if (input.castAbility === 'warlock_drain') {
+          const playerImp = state.pets.find(p => p.ownerId === player.id && p.petType === 'imp' && p.isAlive);
+          if (playerImp) {
+            // Heal event from result contains the heal amount
+            const drainHeal = result.events.find(e => e.heal && e.heal > 0)?.heal || 0;
+            if (drainHeal > 0) {
+              const impHealAmount = Math.round(drainHeal * 0.5); // Imp gets 50% of the heal
+              playerImp.stats.health = Math.min(playerImp.stats.maxHealth, playerImp.stats.health + impHealAmount);
+              events.push({
+                sourceId: player.id,
+                targetId: playerImp.id,
+                heal: impHealAmount,
+                abilityId: 'warlock_drain'
+              });
+              console.log(`[DEBUG] Drain Life COMBO! Imp healed for ${impHealAmount}`);
+            }
+          }
+
+          // WARLOCK COMBO: Hellfire + Drain Life = AoE drain on all enemies with burn DoT
+          const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+          if (currentRoom && target && 'debuffs' in target) {
+            const targetEnemy = target as Enemy;
+            // Check if the primary target has Hellfire burn
+            const hasBurn = targetEnemy.debuffs?.some(d => d.abilityId === 'warlock_hellfire' && d.remainingDuration > 0);
+            if (hasBurn) {
+              console.log(`[DEBUG] Drain Life COMBO! Target has Hellfire burn - draining all burning enemies`);
+              const drainAbility = getAbilityById('warlock_drain');
+              const playerAbility = player.abilities.find(a => a.abilityId === 'warlock_drain');
+              const rank = playerAbility?.rank ?? 1;
+
+              let totalComboHeal = 0;
+              for (const enemy of currentRoom.enemies) {
+                // Skip the primary target (already drained) and dead enemies
+                if (!enemy.isAlive || enemy.id === targetEnemy.id) continue;
+
+                // Only drain enemies with Hellfire burn
+                const enemyHasBurn = enemy.debuffs?.some(d => d.abilityId === 'warlock_hellfire' && d.remainingDuration > 0);
+                if (!enemyHasBurn) continue;
+
+                // Calculate reduced damage for secondary targets (50% of normal)
+                const baseDamage = drainAbility?.ability.baseDamage ?? 20;
+                const scaledDamage = baseDamage * (1 + (rank - 1) * 0.1) * 0.5; // 50% for secondary
+                const totalDamage = Math.round(scaledDamage + player.stats.spellPower * 0.25);
+
+                // Apply damage
+                const resist = enemy.stats.resist;
+                const reduction = 100 / (100 + resist);
+                const finalDamage = Math.round(totalDamage * reduction);
+
+                enemy.stats.health -= finalDamage;
+                const killed = enemy.stats.health <= 0;
+                if (killed) {
+                  enemy.isAlive = false;
+                  this.handleEnemyDeath(state, enemy, player);
+                }
+
+                // Heal from this drain
+                const drainHealSecondary = Math.round(finalDamage * 0.5);
+                totalComboHeal += drainHealSecondary;
+
+                events.push({
+                  sourceId: player.id,
+                  targetId: enemy.id,
+                  abilityId: 'warlock_drain',
+                  damage: finalDamage,
+                  killed
+                });
+              }
+
+              // Apply total combo heal to player
+              if (totalComboHeal > 0) {
+                player.stats.health = Math.min(player.stats.maxHealth, player.stats.health + totalComboHeal);
+                events.push({
+                  sourceId: player.id,
+                  targetId: player.id,
+                  heal: totalComboHeal,
+                  abilityId: 'warlock_drain'
+                });
+                console.log(`[DEBUG] Drain Life AoE COMBO! Extra heal: ${totalComboHeal}`);
+              }
+            }
           }
         }
 
@@ -494,6 +605,36 @@ export class GameStateManager {
               }
 
               console.log(`[DEBUG] Blaze bounced ${bounceCount} additional times`);
+
+              // COMBO: Pyroblast + Blaze - If primary target has Pyroblast stun, stun ALL enemies hit
+              const primaryHasPyroStun = primaryTarget.debuffs?.some(
+                d => d.abilityId === 'mage_pyroblast' && d.remainingDuration > 0
+              );
+              if (primaryHasPyroStun) {
+                console.log(`[DEBUG] Blaze COMBO! Primary target stunned by Pyroblast - stunning all enemies in room`);
+                const stunDuration = 2; // 2 second stun for combo (shorter than Pyroblast's 3s)
+                for (const enemy of currentRoom.enemies) {
+                  if (!enemy.isAlive) continue;
+                  // Don't re-stun the primary target that already has Pyroblast stun
+                  if (enemy.id === primaryTarget.id) continue;
+
+                  const blazeStun = {
+                    id: `blaze_stun_${Date.now()}_${enemy.id}`,
+                    sourceId: player.id,
+                    abilityId: 'mage_blaze',
+                    name: 'Blaze Stun',
+                    damagePerTick: 0,
+                    tickInterval: 1,
+                    remainingDuration: stunDuration,
+                    lastTickTime: Date.now() / 1000,
+                    isStun: true
+                  };
+                  // Add stun (don't remove existing - let them stack)
+                  enemy.debuffs = enemy.debuffs || [];
+                  enemy.debuffs.push(blazeStun);
+                }
+                console.log(`[DEBUG] Blaze stunned all enemies for ${stunDuration}s`);
+              }
             }
           }
         }
@@ -623,13 +764,14 @@ export class GameStateManager {
   /**
    * Update game state (called every tick)
    */
-  update(): Map<string, { state: RunState; events: CombatEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }> {
-    const updates = new Map<string, { state: RunState; events: CombatEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }>();
+  update(): Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }> {
+    const updates = new Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }>();
     const now = Date.now();
     const deltaTime = 1 / GAME_CONFIG.SERVER_TICK_RATE;
 
     for (const [runId, state] of this.runs) {
       const events: CombatEvent[] = [];
+      const tauntEvents: TauntEvent[] = [];
       const collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] = [];
 
       // Update player cooldowns and mana regen
@@ -1836,7 +1978,7 @@ export class GameStateManager {
           // Periodic taunt - every 5 seconds, taunt all nearby enemies (independent of attacks)
           if (pet.tauntCooldown <= 0) {
             const tauntRange = 350; // Range for periodic taunt
-            let tauntedAny = false;
+            const tauntedIds: string[] = [];
             for (const enemy of currentRoom.enemies) {
               if (!enemy.isAlive) continue;
               const dx = enemy.position.x - pet.position.x;
@@ -1844,12 +1986,18 @@ export class GameStateManager {
               const dist = Math.sqrt(dx * dx + dy * dy);
               if (dist <= tauntRange) {
                 enemy.targetId = pet.id;
-                tauntedAny = true;
+                tauntedIds.push(enemy.id);
               }
             }
-            if (tauntedAny) {
+            if (tauntedIds.length > 0) {
               pet.tauntCooldown = 5; // Taunt every 5 seconds
               console.log(`[DEBUG] Pet ${pet.name} taunted enemies in room`);
+              // Emit taunt event for visual feedback
+              tauntEvents.push({
+                sourceId: pet.id,
+                sourcePosition: { x: pet.position.x, y: pet.position.y },
+                targetIds: tauntedIds
+              });
             }
           }
 
@@ -2365,7 +2513,7 @@ export class GameStateManager {
       }
 
       this.lastUpdate.set(runId, now);
-      updates.set(runId, { state, events, collectedItems });
+      updates.set(runId, { state, events, tauntEvents, collectedItems });
     }
 
     return updates;
@@ -3264,6 +3412,36 @@ export class GameStateManager {
   }
 
   /**
+   * Find a valid spawn position near a target position
+   */
+  private findValidSpawnPosition(state: RunState, targetPos: Position, distance: number = 30): Position {
+    // Try positions in a circle around the target
+    const offsets = [
+      { x: distance, y: 0 },
+      { x: -distance, y: 0 },
+      { x: 0, y: distance },
+      { x: 0, y: -distance },
+      { x: distance * 0.7, y: distance * 0.7 },
+      { x: -distance * 0.7, y: distance * 0.7 },
+      { x: distance * 0.7, y: -distance * 0.7 },
+      { x: -distance * 0.7, y: -distance * 0.7 },
+    ];
+
+    for (const offset of offsets) {
+      const testPos = {
+        x: targetPos.x + offset.x,
+        y: targetPos.y + offset.y
+      };
+      if (this.isPositionWalkable(state, testPos)) {
+        return testPos;
+      }
+    }
+
+    // If no valid position found, return target position itself
+    return { x: targetPos.x, y: targetPos.y };
+  }
+
+  /**
    * Summon a pet for a player
    */
   private summonPet(state: RunState, player: Player, abilityId: string): void {
@@ -3275,22 +3453,22 @@ export class GameStateManager {
     const rank = playerAbility?.rank || 1;
     const rankBonus = 1 + (rank - 1) * GAME_CONFIG.RANK_DAMAGE_INCREASE;
 
+    // Find a valid spawn position near the player
+    const spawnPosition = this.findValidSpawnPosition(state, player.position, 30);
+
     // Create pet based on ability
     const petId = uuidv4().slice(0, 8);
     let pet: Pet;
 
     if (abilityId === 'warlock_summon_imp') {
-      const baseHealth = 50 + state.floor * 10;
+      const baseHealth = 100 + state.floor * 10;
       const baseAttack = 8 + state.floor * 2;
       const baseSpell = 12 + state.floor * 3;
       pet = {
         id: petId,
         ownerId: player.id,
         name: rank > 1 ? `Imp (Rank ${rank})` : 'Imp',
-        position: {
-          x: player.position.x + 30,
-          y: player.position.y + 30
-        },
+        position: spawnPosition,
         stats: {
           health: Math.round(baseHealth * rankBonus),
           maxHealth: Math.round(baseHealth * rankBonus),
@@ -3317,10 +3495,7 @@ export class GameStateManager {
         id: petId,
         ownerId: player.id,
         name: rank > 1 ? `Searing Totem (Rank ${rank})` : 'Searing Totem',
-        position: {
-          x: player.position.x + 20,
-          y: player.position.y + 20
-        },
+        position: spawnPosition,
         stats: {
           health: Math.round(baseHealth * rankBonus),
           maxHealth: Math.round(baseHealth * rankBonus),
@@ -3347,10 +3522,7 @@ export class GameStateManager {
         id: petId,
         ownerId: player.id,
         name: rank > 1 ? `Minion (Rank ${rank})` : 'Minion',
-        position: {
-          x: player.position.x + 30,
-          y: player.position.y + 30
-        },
+        position: spawnPosition,
         stats: {
           health: Math.round(baseHealth * rankBonus),
           maxHealth: Math.round(baseHealth * rankBonus),

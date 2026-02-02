@@ -53,20 +53,17 @@ describe('Type Exhaustiveness Tests', () => {
   });
 
   describe('Class Names', () => {
-    it('should have all 9 classes defined', () => {
+    it('should have all 6 classes defined', () => {
       const allClasses: ClassName[] = [
         ClassName.Warrior,
         ClassName.Paladin,
-        ClassName.Hunter,
         ClassName.Rogue,
-        ClassName.Priest,
         ClassName.Shaman,
         ClassName.Mage,
-        ClassName.Warlock,
-        ClassName.Druid
+        ClassName.Warlock
       ];
 
-      expect(allClasses).toHaveLength(9);
+      expect(allClasses).toHaveLength(6);
     });
   });
 

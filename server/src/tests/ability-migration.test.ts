@@ -159,9 +159,6 @@ describe('Ability Migration System', () => {
         ClassName.Mage,
         ClassName.Warlock,
         ClassName.Shaman,
-        ClassName.Priest,
-        ClassName.Hunter,
-        ClassName.Druid,
       ];
 
       for (const className of classNames) {
@@ -178,9 +175,6 @@ describe('Ability Migration System', () => {
         ClassName.Mage,
         ClassName.Warlock,
         ClassName.Shaman,
-        ClassName.Priest,
-        ClassName.Hunter,
-        ClassName.Druid,
       ];
 
       for (const className of classNames) {
