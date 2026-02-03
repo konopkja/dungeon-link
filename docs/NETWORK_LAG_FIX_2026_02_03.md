@@ -100,6 +100,22 @@ This ~230ms input lag is **inherent to server-authoritative architecture** and c
 3. `bbc2a91` - FIX: Camera follows interpolated sprite position
 4. `84c8e3e` - FIX: No interpolation for current player
 
+## Known Issue: Boss Ground Effects
+
+The boss ground effect rendering for floors 14-15 (TectonicQuadrant, VoidGaze, EncroachingDarkness) causes character movement lag when added to GameScene.ts, even when:
+- The effects are in separate functions
+- The code is never executed (floor 1)
+- The switch cases just forward to other functions
+
+**Root cause**: Unknown - possibly V8 engine deoptimization from class size, or bundler (Vite/esbuild) optimization issues.
+
+**Current status**: Boss effect visuals are NOT rendered. The types exist in `shared/types.ts` but the rendering code is intentionally omitted from GameScene.
+
+**Workaround options** (not implemented):
+1. Move boss effects to a dynamically imported module loaded only on floors 14+
+2. Use a completely separate Phaser scene for boss fights
+3. Simplify the effect visuals significantly
+
 ## Future Considerations
 
 ### If More Responsiveness Needed
