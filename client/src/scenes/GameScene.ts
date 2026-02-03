@@ -1590,6 +1590,25 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    // CRITICAL: Validate dungeon data is properly initialized
+    if (!state.dungeon || !state.dungeon.rooms || state.dungeon.rooms.length === 0) {
+      console.warn('[DEBUG] renderWorld skipped - dungeon data not initialized');
+      return;
+    }
+
+    // Validate currentRoomId exists in the rooms array
+    const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+    if (!currentRoom) {
+      console.error('[DEBUG] renderWorld - currentRoomId not found in rooms:', state.dungeon.currentRoomId);
+      console.error('[DEBUG] Available room IDs:', state.dungeon.rooms.map(r => r.id));
+      // Try to recover by using the start room
+      const startRoom = state.dungeon.rooms.find(r => r.type === 'start');
+      if (startRoom) {
+        console.log('[DEBUG] Recovering by using start room:', startRoom.id);
+        state.dungeon.currentRoomId = startRoom.id;
+      }
+    }
+
     // Update floor text (legacy, hidden)
     if (this.floorText) {
       this.floorText.setText(`Floor: ${state.floor}`);
@@ -7871,6 +7890,16 @@ export class GameScene extends Phaser.Scene {
       this.messageUnsubscribe = null;
     }
 
+    // Unsubscribe from disconnect/connect handlers
+    if (this.disconnectUnsubscribe) {
+      this.disconnectUnsubscribe();
+      this.disconnectUnsubscribe = null;
+    }
+    if (this.connectUnsubscribe) {
+      this.connectUnsubscribe();
+      this.connectUnsubscribe = null;
+    }
+
     // Stop all tweens to prevent visual artifacts on scene restart
     this.tweens.killAll();
 
@@ -7881,7 +7910,17 @@ export class GameScene extends Phaser.Scene {
     // CRITICAL: Without this, Q/E/I key handlers accumulate on scene restart
     this.input.keyboard?.removeAllListeners();
 
-    console.log('[DEBUG] GameScene shutdown() complete');
+    // CRITICAL: Clear room caches to prevent stale dungeon rendering on scene restart
+    // This ensures that when a new game starts, rooms are recreated from fresh server state
+    // Bug fix: Without this, leaving game A and starting game B could show game A's rooms
+    this.roomTiles.clear();
+    this.roomDecorations.clear();
+    this.roomWalls.clear();
+    this.roomModifierOverlays.clear();
+    this.corridorElements.clear();
+    this._activeRoomIds.clear();
+
+    console.log('[DEBUG] GameScene shutdown() complete - room caches cleared');
 
     // Destroy systems
     this.inputManager?.destroy();
