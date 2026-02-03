@@ -1006,7 +1006,7 @@ export class GameStateManager {
               }
             }
           }
-          if (patrolCount === 0) {
+          if (DEBUG_LOGGING && patrolCount === 0) {
             console.log(`[DEBUG] No patrols found on floor ${state.floor}`);
           }
         }
@@ -1041,10 +1041,10 @@ export class GameStateManager {
             // BUG FIX: Un-clear the room so the enemy AI loop will process the patrol
             if (currentRoom.cleared) {
               currentRoom.cleared = false;
-              console.log(`[DEBUG] Room ${currentRoom.id} un-cleared due to patrol entering`);
+              if (DEBUG_LOGGING) console.log(`[DEBUG] Room ${currentRoom.id} un-cleared due to patrol entering`);
             }
 
-            console.log(`[DEBUG] Moved patrol ${patrol.name} from ${otherRoom.id} to ${currentRoom.id} (player room)`);
+            if (DEBUG_LOGGING) console.log(`[DEBUG] Moved patrol ${patrol.name} from ${otherRoom.id} to ${currentRoom.id} (player room)`);
           }
         }
       }
