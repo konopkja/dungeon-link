@@ -135,6 +135,9 @@ export class GameScene extends Phaser.Scene {
   private vendorModalOpen: boolean = false;
 
   private messageUnsubscribe: (() => void) | null = null;
+  private disconnectUnsubscribe: (() => void) | null = null;
+  private connectUnsubscribe: (() => void) | null = null;
+  private disconnectIndicator: Phaser.GameObjects.Container | null = null;
 
   // Lives tracking
   private wasAlive: boolean = true;
@@ -324,6 +327,8 @@ export class GameScene extends Phaser.Scene {
       this.targetMechanicsText = null;
       this.targetHealthText = null;
       this.targetHealthBar = null;
+      safeDestroy(this.disconnectIndicator);
+      this.disconnectIndicator = null;
       safeDestroy(this.healthPotionSlot);
       this.healthPotionSlot = null;
       this.healthPotionCount = null;
@@ -418,8 +423,27 @@ export class GameScene extends Phaser.Scene {
         this.messageUnsubscribe();
         this.messageUnsubscribe = null;
       }
+      if (this.disconnectUnsubscribe) {
+        this.disconnectUnsubscribe();
+        this.disconnectUnsubscribe = null;
+      }
+      if (this.connectUnsubscribe) {
+        this.connectUnsubscribe();
+        this.connectUnsubscribe = null;
+      }
+
       // Subscribe to server messages
       this.messageUnsubscribe = wsClient.onMessage((message) => this.handleServerMessage(message));
+
+      // Subscribe to disconnect/reconnect events
+      this.disconnectUnsubscribe = wsClient.onDisconnect(() => {
+        console.log('[GameScene] Connection lost!');
+        this.showDisconnectIndicator();
+      });
+      this.connectUnsubscribe = wsClient.onConnect(() => {
+        console.log('[GameScene] Reconnected!');
+        this.hideDisconnectIndicator();
+      });
 
       // Initial render - only if we have valid, fresh state
       // CRITICAL: Validate that currentState belongs to the current run to prevent
@@ -1666,8 +1690,10 @@ export class GameScene extends Phaser.Scene {
       const wasMoving = this.isPlayerMoving;
       this.isPlayerMoving = inputMoving || false;
 
-      if (distMoved > 2) {
-        // Play footstep sound when actually moving
+      // Play footstep sound based on INPUT state (not position change)
+      // This ensures sound plays immediately when player presses movement keys,
+      // rather than waiting for server round-trip
+      if (this.isPlayerMoving) {
         const now = Date.now();
         if (now - this.lastFootstepTime > this.footstepCooldown) {
           this.playSfx('sfxFootstep');
@@ -7240,6 +7266,80 @@ export class GameScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => impact.destroy()
     });
+  }
+
+  /**
+   * Show disconnect indicator when connection to server is lost
+   */
+  private showDisconnectIndicator(): void {
+    // Don't create duplicate indicators
+    if (this.disconnectIndicator) return;
+
+    const width = this.cameras.main.width;
+    const height = this.cameras.main.height;
+
+    this.disconnectIndicator = this.add.container(width / 2, height / 2);
+    this.disconnectIndicator.setScrollFactor(0);
+    this.disconnectIndicator.setDepth(1000); // Above everything
+
+    // Semi-transparent dark overlay
+    const overlay = this.add.rectangle(0, 0, width, height, 0x000000, 0.7);
+    this.disconnectIndicator.add(overlay);
+
+    // Main panel
+    const panelWidth = 320;
+    const panelHeight = 140;
+    const panel = this.add.rectangle(0, 0, panelWidth, panelHeight, 0x1a1a2e, 1);
+    panel.setStrokeStyle(3, 0xff4444);
+    this.disconnectIndicator.add(panel);
+
+    // Warning icon
+    const icon = this.add.text(0, -35, '⚠', {
+      fontSize: '36px',
+      color: '#ff4444'
+    }).setOrigin(0.5);
+    this.disconnectIndicator.add(icon);
+
+    // Title text
+    const title = this.add.text(0, 5, 'CONNECTION LOST', {
+      fontSize: '18px',
+      fontFamily: 'Georgia, serif',
+      color: '#ff4444',
+      fontStyle: 'bold'
+    }).setOrigin(0.5);
+    this.disconnectIndicator.add(title);
+
+    // Subtitle
+    const subtitle = this.add.text(0, 35, 'Attempting to reconnect...', {
+      fontSize: '14px',
+      fontFamily: 'Georgia, serif',
+      color: '#aaaaaa'
+    }).setOrigin(0.5);
+    this.disconnectIndicator.add(subtitle);
+
+    // Pulsing animation on the panel border
+    this.tweens.add({
+      targets: panel,
+      alpha: { from: 1, to: 0.7 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1
+    });
+
+    // Stop music when disconnected
+    if (this.currentMusic && this.currentMusic.isPlaying) {
+      this.currentMusic.stop();
+    }
+  }
+
+  /**
+   * Hide disconnect indicator when connection is restored
+   */
+  private hideDisconnectIndicator(): void {
+    if (this.disconnectIndicator) {
+      this.disconnectIndicator.destroy();
+      this.disconnectIndicator = null;
+    }
   }
 
   private showNotification(text: string, color?: number, type?: 'info' | 'warning' | 'danger' | 'success' | 'loot' | 'rare'): void {

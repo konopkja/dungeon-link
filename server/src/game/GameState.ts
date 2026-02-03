@@ -1016,11 +1016,14 @@ export class GameStateManager {
             if (!enemy.isPatrolling) continue;
 
             // Check if this patrol is physically inside the current room
+            // BUG FIX: Add margin to prevent detecting patrols in corridors as "inside" the room
+            // Corridors connect at room edges, so we need a buffer to avoid false positives
+            const ROOM_MARGIN = 60; // Patrol must be at least 60px inside room bounds
             const inCurrentRoom =
-              enemy.position.x >= currentRoom.x &&
-              enemy.position.x <= currentRoom.x + currentRoom.width &&
-              enemy.position.y >= currentRoom.y &&
-              enemy.position.y <= currentRoom.y + currentRoom.height;
+              enemy.position.x >= currentRoom.x + ROOM_MARGIN &&
+              enemy.position.x <= currentRoom.x + currentRoom.width - ROOM_MARGIN &&
+              enemy.position.y >= currentRoom.y + ROOM_MARGIN &&
+              enemy.position.y <= currentRoom.y + currentRoom.height - ROOM_MARGIN;
 
             if (inCurrentRoom) {
               patrolsToMove.push(enemy);
