@@ -213,11 +213,13 @@ export function WalletOverlay() {
     <>
       {/* Wallet connect, claim button, and ETH counter in header */}
       <div id="wallet-header-mount">
-        <ClaimButton
-          onClaimClick={handleClaimClick}
-          onConnectClick={handleConnectClick}
-        />
-        <AccumulatedEthCounter />
+        <div className="eth-claim-stack">
+          <AccumulatedEthCounter />
+          <ClaimButton
+            onClaimClick={handleClaimClick}
+            onConnectClick={handleConnectClick}
+          />
+        </div>
         <WalletConnectButton />
       </div>
       {/* Pool display updater - updates vault DOM elements */}
@@ -259,8 +261,15 @@ export function injectWalletStyles() {
       right: 16px;
       z-index: 1000;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 12px;
+    }
+
+    .eth-claim-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
     }
 
     .accumulated-eth-counter {
