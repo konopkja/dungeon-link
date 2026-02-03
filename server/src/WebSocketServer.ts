@@ -30,6 +30,8 @@ export class GameWebSocketServer {
   private wss: WebSocketServer;
   private httpServer: ReturnType<typeof createServer>;
   private clients: Map<WebSocket, ClientConnection> = new Map();
+  // Optimization: Direct lookup of clients by runId (O(1) instead of O(n))
+  private runClients: Map<string, Set<WebSocket>> = new Map();
   private updateInterval: NodeJS.Timeout | null = null;
 
   constructor(port: number = WS_CONFIG.PORT) {
@@ -96,6 +98,8 @@ export class GameWebSocketServer {
         // Clean up crypto state (single-player: always cleanup on disconnect)
         if (client.runId) {
           cleanupCryptoState(client.runId);
+          // Remove from run lookup
+          this.removeClientFromRun(ws, client.runId);
         }
       }
       this.clients.delete(ws);
@@ -115,6 +119,9 @@ export class GameWebSocketServer {
           if (DEBUG_LOGGING) console.log('[DEBUG] Run created:', result.runId);
           client.playerId = result.playerId;
           client.runId = result.runId;
+
+          // Register client in run lookup (O(1) broadcast optimization)
+          this.addClientToRun(client.ws, result.runId);
 
           // Initialize crypto state for this run
           initializeCryptoState(result.runId);
@@ -136,6 +143,9 @@ export class GameWebSocketServer {
         const result = gameStateManager.createRunFromSave(message.saveData);
         client.playerId = result.playerId;
         client.runId = result.runId;
+
+        // Register client in run lookup (O(1) broadcast optimization)
+        this.addClientToRun(client.ws, result.runId);
 
         // Initialize crypto state for this run
         initializeCryptoState(result.runId);
@@ -400,10 +410,35 @@ export class GameWebSocketServer {
     }
   }
 
+  // Helper to add client to run lookup
+  private addClientToRun(ws: WebSocket, runId: string): void {
+    if (!this.runClients.has(runId)) {
+      this.runClients.set(runId, new Set());
+    }
+    this.runClients.get(runId)!.add(ws);
+  }
+
+  // Helper to remove client from run lookup
+  private removeClientFromRun(ws: WebSocket, runId: string): void {
+    const clients = this.runClients.get(runId);
+    if (clients) {
+      clients.delete(ws);
+      if (clients.size === 0) {
+        this.runClients.delete(runId);
+      }
+    }
+  }
+
+  // Optimized broadcast: O(1) lookup + single JSON.stringify
   private broadcastToRun(runId: string, message: ServerMessage, exclude?: WebSocket): void {
-    for (const [ws, client] of this.clients) {
-      if (client.runId === runId && ws !== exclude) {
-        this.send(ws, message);
+    const clients = this.runClients.get(runId);
+    if (!clients || clients.size === 0) return;
+
+    // Stringify once, send to all clients in run
+    const data = JSON.stringify(message);
+    for (const ws of clients) {
+      if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
       }
     }
   }
