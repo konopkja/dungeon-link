@@ -8,6 +8,10 @@ import { SaveData } from '@dungeon-link/shared';
 import { wsClient } from './network/WebSocketClient';
 import { initWalletUI, preloadWallet } from './wallet/lazyWallet';
 
+// Build version for deployment verification
+const BUILD_VERSION = 'v2026.02.03-b';
+console.log(`[DungeonLink] Build: ${BUILD_VERSION}`);
+
 // Leaderboard storage key
 const LEADERBOARD_KEY = 'dungeonlink_leaderboard';
 
@@ -23,7 +27,7 @@ interface LeaderboardEntry {
 let game: Phaser.Game | null = null;
 
 const config: Phaser.Types.Core.GameConfig = {
-  type: Phaser.CANVAS,  // Force Canvas rendering to diagnose WebGL issues
+  type: Phaser.AUTO,  // AUTO prefers WebGL, falls back to Canvas
   width: 1024,
   height: 768,
   parent: 'game-container',
