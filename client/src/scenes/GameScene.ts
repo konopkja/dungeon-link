@@ -4623,6 +4623,13 @@ export class GameScene extends Phaser.Scene {
         container.add(glow);
         break;
       }
+
+      // Boss mechanics - handled by separate function to avoid switch deoptimization
+      case GroundEffectType.TectonicQuadrant:
+      case GroundEffectType.VoidGaze:
+      case GroundEffectType.EncroachingDarkness:
+        this.createBossGroundEffect(container, effect, color);
+        break;
     }
 
     // Add warning indicator for new effects
@@ -4684,15 +4691,237 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
+
+      // Boss mechanics - handled by separate function to avoid switch deoptimization
+      case GroundEffectType.TectonicQuadrant:
+      case GroundEffectType.VoidGaze:
+      case GroundEffectType.EncroachingDarkness:
+        this.updateBossGroundEffect(container, effect, color);
+        return; // Skip default pulse for boss effects
     }
 
-    // Pulse effect for all types
+    // Pulse effect for regular effects (boss effects return early above)
     const pulseAmount = 1 + Math.sin(this.time.now / 200) * 0.1;
     container.setScale(pulseAmount);
 
     // Fade as duration decreases
     if (effect.duration < 1) {
       container.setAlpha(effect.duration);
+    }
+  }
+
+  // Separate function for boss ground effects to avoid switch statement deoptimization
+  private createBossGroundEffect(container: Phaser.GameObjects.Container, effect: GroundEffect, color: number): void {
+    switch (effect.type) {
+      case GroundEffectType.TectonicQuadrant: {
+        const safeQuadrant = effect.safeQuadrant ?? 0;
+        const radius = effect.radius;
+
+        for (let i = 0; i < 4; i++) {
+          const isSafe = i === safeQuadrant;
+          const quadColor = isSafe ? 0x00ff00 : 0xff0000;
+          const startAngle = (i * Math.PI / 2) - Math.PI;
+
+          const wedge = this.add.graphics();
+          wedge.fillStyle(quadColor, isSafe ? 0.15 : 0.25);
+          wedge.lineStyle(3, quadColor, 0.8);
+          wedge.beginPath();
+          wedge.moveTo(0, 0);
+          wedge.arc(0, 0, radius, startAngle, startAngle + Math.PI / 2, false);
+          wedge.closePath();
+          wedge.fillPath();
+          wedge.strokePath();
+          wedge.setName(`quadrant_${i}`);
+          container.add(wedge);
+
+          const iconAngle = startAngle + Math.PI / 4;
+          const iconDist = radius * 0.6;
+          const icon = this.add.text(
+            Math.cos(iconAngle) * iconDist,
+            Math.sin(iconAngle) * iconDist,
+            isSafe ? '✓' : '✗',
+            { fontSize: '32px', color: isSafe ? '#00ff00' : '#ff0000', fontStyle: 'bold' }
+          ).setOrigin(0.5);
+          icon.setName(`icon_${i}`);
+          container.add(icon);
+        }
+
+        const center = this.add.circle(0, 0, 15, color, 0.5);
+        center.setStrokeStyle(2, color, 1);
+        center.setName('center');
+        container.add(center);
+
+        const telegraphText = this.add.text(0, -radius - 30, 'TECTONIC SHIFT!', {
+          fontSize: '24px', color: '#ffcc00', fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: 3
+        }).setOrigin(0.5);
+        telegraphText.setName('telegraph_text');
+        container.add(telegraphText);
+        break;
+      }
+
+      case GroundEffectType.VoidGaze: {
+        const coneAngle = effect.coneAngle ?? Math.PI / 3;
+        const coneDirection = effect.coneDirection ?? 0;
+        const radius = effect.radius;
+
+        const cone = this.add.graphics();
+        cone.fillStyle(color, 0.2);
+        cone.lineStyle(4, color, 0.8);
+        cone.beginPath();
+        cone.moveTo(0, 0);
+        cone.arc(0, 0, radius, -coneAngle / 2, coneAngle / 2, false);
+        cone.closePath();
+        cone.fillPath();
+        cone.strokePath();
+        cone.setName('cone');
+        (cone as any)._wasActive = false;
+        container.add(cone);
+
+        container.setRotation(coneDirection);
+
+        const eyeGlow = this.add.circle(0, 0, 25, color, 0.6);
+        eyeGlow.setName('eye_glow');
+        container.add(eyeGlow);
+
+        const eyeText = this.add.text(0, 0, '👁', { fontSize: '36px' }).setOrigin(0.5);
+        eyeText.setName('eye_icon');
+        container.add(eyeText);
+
+        const warningText = this.add.text(0, -50, 'DODGE THE GAZE!', {
+          fontSize: '20px', color: '#ff00ff', fontStyle: 'bold',
+          stroke: '#000000', strokeThickness: 3
+        }).setOrigin(0.5);
+        warningText.setName('warning_text');
+        container.add(warningText);
+        break;
+      }
+
+      case GroundEffectType.EncroachingDarkness: {
+        const innerRadius = effect.innerRadius ?? 0;
+        const safeRadius = Math.max(1, effect.radius - innerRadius);
+
+        const outerRing = this.add.graphics();
+        outerRing.fillStyle(0x220033, 0.7);
+        outerRing.beginPath();
+        outerRing.arc(0, 0, effect.radius, 0, Math.PI * 2);
+        outerRing.arc(0, 0, safeRadius, 0, Math.PI * 2, true);
+        outerRing.closePath();
+        outerRing.fillPath();
+        outerRing.setName('outer_ring');
+        container.add(outerRing);
+
+        const safeZone = this.add.circle(0, 0, safeRadius, 0x00ff00, 0.1);
+        safeZone.setStrokeStyle(3, 0x00ff00, 0.5);
+        safeZone.setName('safe_zone');
+        container.add(safeZone);
+
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2;
+          const particle = this.add.circle(
+            Math.cos(angle) * effect.radius,
+            Math.sin(angle) * effect.radius,
+            5, 0x8800ff, 0.8
+          );
+          particle.setName(`particle_${i}`);
+          container.add(particle);
+        }
+        break;
+      }
+    }
+  }
+
+  // Separate function for updating boss ground effects
+  private updateBossGroundEffect(container: Phaser.GameObjects.Container, effect: GroundEffect, color: number): void {
+    switch (effect.type) {
+      case GroundEffectType.TectonicQuadrant: {
+        const isActive = effect.isActive ?? false;
+        const safeQuadrant = effect.safeQuadrant ?? 0;
+
+        for (let i = 0; i < 4; i++) {
+          const quadrant = container.getByName(`quadrant_${i}`) as Phaser.GameObjects.Graphics;
+          const icon = container.getByName(`icon_${i}`) as Phaser.GameObjects.Text;
+          if (quadrant && icon) {
+            const isSafe = i === safeQuadrant;
+            if (isActive && !isSafe) {
+              quadrant.setAlpha(0.3 + Math.sin(this.time.now / 100) * 0.15);
+            } else {
+              quadrant.setAlpha(isSafe ? 0.15 : 0.25);
+            }
+            icon.setAlpha(isActive ? 1 : 0.8);
+          }
+        }
+        break;
+      }
+
+      case GroundEffectType.VoidGaze: {
+        const cone = container.getByName('cone') as Phaser.GameObjects.Graphics;
+        const eyeGlow = container.getByName('eye_glow') as Phaser.GameObjects.Arc;
+        const warningText = container.getByName('warning_text') as Phaser.GameObjects.Text;
+        const isActive = effect.isActive ?? false;
+        const coneDirection = effect.coneDirection ?? 0;
+
+        container.setRotation(coneDirection);
+
+        if (cone) {
+          const wasActive = (cone as any)._wasActive ?? false;
+          if (isActive !== wasActive) {
+            (cone as any)._wasActive = isActive;
+            cone.clear();
+            const coneAngle = effect.coneAngle ?? Math.PI / 3;
+            cone.fillStyle(color, isActive ? 0.5 : 0.2);
+            cone.lineStyle(4, color, isActive ? 1 : 0.8);
+            cone.beginPath();
+            cone.moveTo(0, 0);
+            cone.arc(0, 0, effect.radius, -coneAngle / 2, coneAngle / 2, false);
+            cone.closePath();
+            cone.fillPath();
+            cone.strokePath();
+          }
+        }
+
+        if (eyeGlow) {
+          const glowSize = isActive ? 30 + Math.sin(this.time.now / 80) * 8 : 25;
+          eyeGlow.setRadius(glowSize);
+          eyeGlow.setFillStyle(color, isActive ? 0.9 : 0.6);
+        }
+
+        if (warningText) warningText.setVisible(!isActive);
+        break;
+      }
+
+      case GroundEffectType.EncroachingDarkness: {
+        const outerRing = container.getByName('outer_ring') as Phaser.GameObjects.Graphics;
+        const safeZone = container.getByName('safe_zone') as Phaser.GameObjects.Arc;
+        const innerRadius = effect.innerRadius ?? 0;
+        const safeRadius = Math.max(1, effect.radius - innerRadius);
+
+        if (outerRing) {
+          outerRing.clear();
+          outerRing.fillStyle(0x220033, 0.7);
+          outerRing.beginPath();
+          outerRing.arc(0, 0, effect.radius, 0, Math.PI * 2);
+          outerRing.arc(0, 0, safeRadius, 0, Math.PI * 2, true);
+          outerRing.closePath();
+          outerRing.fillPath();
+        }
+
+        if (safeZone) {
+          safeZone.setRadius(safeRadius);
+          const urgency = innerRadius / effect.radius;
+          const alpha = 0.1 + Math.sin(this.time.now / (200 - urgency * 150)) * 0.1 * urgency;
+          safeZone.setFillStyle(0x00ff00, alpha);
+        }
+
+        for (let i = 0; i < 8; i++) {
+          const particle = container.getByName(`particle_${i}`) as Phaser.GameObjects.Arc;
+          if (particle) {
+            const angle = (i / 8) * Math.PI * 2 + this.time.now / 2000;
+            particle.setPosition(Math.cos(angle) * safeRadius, Math.sin(angle) * safeRadius);
+          }
+        }
+        break;
+      }
     }
   }
 
