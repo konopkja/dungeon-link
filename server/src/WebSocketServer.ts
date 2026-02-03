@@ -337,7 +337,7 @@ export class GameWebSocketServer {
     this.updateInterval = setInterval(() => {
       const updates = gameStateManager.update();
 
-      for (const [runId, { state, events, tauntEvents, collectedItems }] of updates) {
+      for (const [runId, { state, events, tauntEvents, collectedItems, soulstoneRevives }] of updates) {
         // Broadcast state update
         this.broadcastToRun(runId, {
           type: 'STATE_UPDATE',
@@ -357,6 +357,15 @@ export class GameWebSocketServer {
           this.broadcastToRun(runId, {
             type: 'TAUNT_EVENT',
             event
+          });
+        }
+
+        // Broadcast Soulstone revive events (for sound/animation)
+        for (const revive of soulstoneRevives) {
+          this.broadcastToRun(runId, {
+            type: 'SOULSTONE_REVIVE',
+            playerId: revive.playerId,
+            position: revive.position
           });
         }
 

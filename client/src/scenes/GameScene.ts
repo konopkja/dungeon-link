@@ -5650,6 +5650,9 @@ export class GameScene extends Phaser.Scene {
       // Imp taunt visual effect
       const event = message.event;
       this.playTauntEffect(event.sourcePosition.x, event.sourcePosition.y, event.targetIds);
+    } else if (message.type === 'SOULSTONE_REVIVE') {
+      // Soulstone resurrection effect
+      this.playSoulstoneReviveEffect(message.position.x, message.position.y);
     } else if (message.type === 'LOOT_DROP') {
       // Play loot sound
       this.playSfx('sfxLoot');
@@ -7551,6 +7554,148 @@ export class GameScene extends Phaser.Scene {
       duration: 500,
       onComplete: () => flash.destroy()
     });
+  }
+
+  /**
+   * Soulstone resurrection effect - dark purple/green warlock-themed revival
+   */
+  private playSoulstoneReviveEffect(x: number, y: number): void {
+    // Play resurrection sound (dramatic)
+    try {
+      this.sound.play('sfxLevelUp', { volume: 0.6 });
+      // Delayed second sound for dramatic effect
+      this.time.delayedCall(200, () => {
+        this.sound.play('sfxHealSpell', { volume: 0.5 });
+      });
+    } catch {
+      // Sound not loaded
+    }
+
+    // 1. Dark soul particles spiraling inward (souls gathering)
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2;
+      const startDist = 120;
+      const startX = x + Math.cos(angle) * startDist;
+      const startY = y + Math.sin(angle) * startDist;
+
+      // Soul wisp (purple/green gradient)
+      const colors = [0x9933ff, 0x66ff66, 0x6600cc, 0x33cc33];
+      const particle = this.add.circle(startX, startY, 6 + Math.random() * 4, colors[i % colors.length]);
+      particle.setDepth(150);
+      particle.setAlpha(0.8);
+
+      // Spiral inward
+      this.tweens.add({
+        targets: particle,
+        x: x,
+        y: y,
+        scale: 0.3,
+        alpha: 0,
+        duration: 600 + Math.random() * 200,
+        ease: 'Cubic.easeIn',
+        onComplete: () => particle.destroy()
+      });
+    }
+
+    // 2. Central explosion burst after souls converge
+    this.time.delayedCall(500, () => {
+      // Purple/green burst
+      for (let i = 0; i < 24; i++) {
+        const angle = (i / 24) * Math.PI * 2;
+        const speed = 60 + Math.random() * 80;
+        const colors = [0x9933ff, 0x66ff66, 0xcc66ff];
+        const particle = this.add.circle(x, y, 5 + Math.random() * 5, colors[i % colors.length]);
+        particle.setDepth(150);
+
+        this.tweens.add({
+          targets: particle,
+          x: x + Math.cos(angle) * speed,
+          y: y + Math.sin(angle) * speed,
+          alpha: 0,
+          scale: 0,
+          duration: 700 + Math.random() * 300,
+          ease: 'Cubic.easeOut',
+          onComplete: () => particle.destroy()
+        });
+      }
+
+      // Screen flash (subtle purple)
+      const flash = this.add.rectangle(
+        this.scale.width / 2,
+        this.scale.height / 2,
+        this.scale.width + 100,
+        this.scale.height + 100,
+        0x9933ff, 0.25
+      );
+      flash.setScrollFactor(0).setDepth(140);
+
+      this.tweens.add({
+        targets: flash,
+        alpha: 0,
+        duration: 400,
+        onComplete: () => flash.destroy()
+      });
+    });
+
+    // 3. Rising soul wisps
+    for (let i = 0; i < 10; i++) {
+      this.time.delayedCall(600 + i * 80, () => {
+        const wisp = this.add.ellipse(
+          x + Phaser.Math.Between(-25, 25),
+          y + 15,
+          8, 12,
+          i % 2 === 0 ? 0x9933ff : 0x66ff66
+        );
+        wisp.setDepth(150);
+        wisp.setAlpha(0.7);
+
+        this.tweens.add({
+          targets: wisp,
+          y: y - 70 - Math.random() * 40,
+          alpha: 0,
+          scaleX: 0.5,
+          scaleY: 2,
+          duration: 900,
+          ease: 'Cubic.easeOut',
+          onComplete: () => wisp.destroy()
+        });
+      });
+    }
+
+    // 4. "REVIVED!" text
+    this.time.delayedCall(500, () => {
+      const revivedText = this.add.text(x, y - 30, 'REVIVED!', {
+        fontFamily: FONTS.title,
+        fontSize: '32px',
+        color: '#66ff66',
+        stroke: '#000000',
+        strokeThickness: 4
+      }).setOrigin(0.5).setDepth(160);
+      revivedText.setScale(0.5);
+      revivedText.setAlpha(0);
+
+      this.tweens.add({
+        targets: revivedText,
+        scale: 1.1,
+        alpha: 1,
+        duration: 200,
+        ease: 'Back.easeOut',
+        onComplete: () => {
+          this.tweens.add({
+            targets: revivedText,
+            y: y - 80,
+            alpha: 0,
+            duration: 1200,
+            delay: 600,
+            ease: 'Cubic.easeIn',
+            onComplete: () => revivedText.destroy()
+          });
+        }
+      });
+    });
+
+    // Show notification
+    this.showNotification('Soulstone activated!', 0x9933ff, 'info');
   }
 
   private handleClick(pointer: Phaser.Input.Pointer): void {

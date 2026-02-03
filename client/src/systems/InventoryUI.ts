@@ -95,6 +95,14 @@ export class InventoryUI {
   private tooltipBg: Phaser.GameObjects.Rectangle | null = null;
   private tooltipText: Phaser.GameObjects.Text | null = null;
 
+  // Collapsible set bonuses
+  private expandedSetId: string | null = null;
+  private setHeaders: Map<string, Phaser.GameObjects.Text> = new Map();
+  private setBonusContainer: Phaser.GameObjects.Container | null = null;
+  private bonusPanelX: number = 0;
+  private bonusPanelY: number = 0;
+  private bonusPanelW: number = 0;
+
   private readonly DEPTH = 1000;
   private cachedEquipmentIds: Map<EquipSlot, string | null> = new Map();
   private cachedStatsText: string = '';
@@ -273,7 +281,19 @@ export class InventoryUI {
     }));
     bonusHeader.setOrigin(0.5, 0.5);
 
-    // Bonus text - 14px
+    // Store bonus panel coordinates for dynamic set display
+    this.bonusPanelX = bonusX;
+    this.bonusPanelY = topY + 45;
+    this.bonusPanelW = bonusW;
+
+    // Container for collapsible set bonuses
+    this.setBonusContainer = this.scene.add.container(0, 0);
+    this.setBonusContainer.setDepth(this.DEPTH);
+    this.setBonusContainer.setScrollFactor(0);
+    this.setBonusContainer.setVisible(false);
+    this.allElements.push(this.setBonusContainer);
+
+    // Placeholder text for when no sets are equipped
     this.setBonusText = this.addElement(this.scene.add.text(bonusX + 12, topY + 45, '', {
       fontFamily: FONTS.body, fontSize: '14px', color: '#88cc88', lineSpacing: 4,
       wordWrap: { width: bonusW - 24 },
@@ -628,31 +648,9 @@ export class InventoryUI {
       this.statText.setText(newStatsText);
     }
 
-    // Update set bonuses
+    // Update set bonuses - collapsible system
     const setCounts = countSetPieces(player.equipment);
-    if (this.setBonusText) {
-      const bonusLines: string[] = [];
-      if (setCounts.size > 0) {
-        for (const [setId, count] of setCounts) {
-          bonusLines.push(`${SET_NAMES[setId] ?? setId}`);
-          bonusLines.push(`(${count}/5 pieces)`);
-          const bonuses = SET_BONUSES[setId];
-          if (bonuses) {
-            for (const bonus of bonuses) {
-              bonusLines.push((count >= bonus.pieces ? '✓ ' : '○ ') + bonus.desc);
-            }
-          }
-          bonusLines.push('');
-        }
-      } else {
-        bonusLines.push('No set bonuses');
-        bonusLines.push('');
-        bonusLines.push('Collect matching');
-        bonusLines.push('set pieces for');
-        bonusLines.push('bonuses!');
-      }
-      this.setBonusText.setText(bonusLines.join('\n'));
-    }
+    this.updateCollapsibleSetBonuses(setCounts);
 
     // Update backpack
     for (let i = 0; i < this.backpackSlots.length; i++) {
@@ -690,6 +688,140 @@ export class InventoryUI {
         if (border) border.setFillStyle(0x2a2a4a);
         itemText.setText('');
       }
+    }
+  }
+
+  private updateCollapsibleSetBonuses(setCounts: Map<string, number>): void {
+    if (!this.setBonusContainer) return;
+
+    // Clear existing container content
+    this.setBonusContainer.removeAll(true);
+    this.setHeaders.clear();
+
+    // Show placeholder text if no sets
+    if (setCounts.size === 0) {
+      if (this.setBonusText) {
+        this.setBonusText.setText('No set bonuses\n\nCollect matching\nset pieces for\nbonuses!');
+        this.setBonusText.setVisible(this.visible);
+      }
+      this.setBonusContainer.setVisible(false);
+      return;
+    }
+
+    // Hide placeholder, show container
+    if (this.setBonusText) {
+      this.setBonusText.setVisible(false);
+    }
+    this.setBonusContainer.setVisible(this.visible);
+
+    // Auto-expand first set if nothing is expanded
+    if (this.expandedSetId === null || !setCounts.has(this.expandedSetId)) {
+      this.expandedSetId = setCounts.keys().next().value ?? null;
+    }
+
+    let yOffset = 0;
+    const lineHeight = 20;
+    const headerHeight = 28;
+    const padding = 8;
+
+    for (const [setId, count] of setCounts) {
+      const isExpanded = this.expandedSetId === setId;
+      const setName = SET_NAMES[setId] ?? setId;
+
+      // Create clickable header
+      const headerBg = this.scene.add.rectangle(
+        this.bonusPanelX + this.bonusPanelW / 2,
+        this.bonusPanelY + yOffset + headerHeight / 2,
+        this.bonusPanelW - 16,
+        headerHeight,
+        isExpanded ? 0x2a3a2a : 0x1a2a1a,
+        0.9
+      );
+      headerBg.setStrokeStyle(1, isExpanded ? 0x4a6a4a : 0x3a4a3a);
+      headerBg.setScrollFactor(0);
+      headerBg.setInteractive({ useHandCursor: true });
+
+      const arrow = isExpanded ? '▼' : '▶';
+      const headerText = this.scene.add.text(
+        this.bonusPanelX + 16,
+        this.bonusPanelY + yOffset + headerHeight / 2,
+        `${arrow} ${setName} (${count}/5)`,
+        {
+          fontFamily: FONTS.body,
+          fontSize: '14px',
+          color: isExpanded ? '#88ff88' : '#66cc66',
+          stroke: '#000000',
+          strokeThickness: 1
+        }
+      );
+      headerText.setOrigin(0, 0.5);
+      headerText.setScrollFactor(0);
+
+      // Store reference for updates
+      this.setHeaders.set(setId, headerText);
+
+      // Click handler for header
+      const currentSetId = setId;
+      headerBg.on('pointerover', () => {
+        headerBg.setFillStyle(0x3a4a3a);
+        headerText.setColor('#aaffaa');
+      });
+      headerBg.on('pointerout', () => {
+        const expanded = this.expandedSetId === currentSetId;
+        headerBg.setFillStyle(expanded ? 0x2a3a2a : 0x1a2a1a);
+        headerText.setColor(expanded ? '#88ff88' : '#66cc66');
+      });
+      headerBg.on('pointerdown', () => {
+        this.toggleSetExpansion(currentSetId);
+      });
+
+      this.setBonusContainer.add([headerBg, headerText]);
+      yOffset += headerHeight + 4;
+
+      // Show bonuses if expanded
+      if (isExpanded) {
+        const bonuses = SET_BONUSES[setId];
+        if (bonuses) {
+          for (const bonus of bonuses) {
+            const isActive = count >= bonus.pieces;
+            const symbol = isActive ? '✓' : '○';
+            const bonusText = this.scene.add.text(
+              this.bonusPanelX + 20,
+              this.bonusPanelY + yOffset,
+              `${symbol} ${bonus.desc}`,
+              {
+                fontFamily: FONTS.body,
+                fontSize: '13px',
+                color: isActive ? '#88cc88' : '#556655',
+                stroke: '#000000',
+                strokeThickness: 1,
+                wordWrap: { width: this.bonusPanelW - 40 }
+              }
+            );
+            bonusText.setScrollFactor(0);
+            this.setBonusContainer.add(bonusText);
+            yOffset += lineHeight;
+          }
+        }
+        yOffset += padding;
+      }
+    }
+  }
+
+  private toggleSetExpansion(setId: string): void {
+    // Toggle: if already expanded, collapse it; otherwise expand it
+    if (this.expandedSetId === setId) {
+      // Keep it expanded (at least one should be expanded)
+      // Or toggle to collapse all - let's keep one always expanded for now
+      return;
+    }
+    this.expandedSetId = setId;
+
+    // Force re-render
+    const player = wsClient.getCurrentPlayer();
+    if (player) {
+      const setCounts = countSetPieces(player.equipment);
+      this.updateCollapsibleSetBonuses(setCounts);
     }
   }
 

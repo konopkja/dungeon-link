@@ -611,6 +611,7 @@ export type ServerMessage =
   | { type: 'CHEST_OPENED'; chestId: string; playerId: string; loot: string[] } // Chest opened with loot descriptions
   | { type: 'TRAP_TRIGGERED'; trapId: string; playerId: string; damage: number } // Player hit by trap
   | { type: 'POTION_USED'; playerId: string; potionType: 'health' | 'mana' } // Player used a potion
+  | { type: 'SOULSTONE_REVIVE'; playerId: string; position: Position } // Player revived by Soulstone
   | { type: 'PONG' }
   // Crypto messages
   | { type: 'WALLET_CONNECTED'; walletAddress: string; cryptoAccountId: string }

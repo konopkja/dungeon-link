@@ -765,8 +765,8 @@ export class GameStateManager {
   /**
    * Update game state (called every tick)
    */
-  update(): Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }> {
-    const updates = new Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }>();
+  update(): Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[]; soulstoneRevives: { playerId: string; position: Position }[] }> {
+    const updates = new Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[]; soulstoneRevives: { playerId: string; position: Position }[] }>();
     const now = Date.now();
     const deltaTime = 1 / GAME_CONFIG.SERVER_TICK_RATE;
 
@@ -774,6 +774,7 @@ export class GameStateManager {
       const events: CombatEvent[] = [];
       const tauntEvents: TauntEvent[] = [];
       const collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] = [];
+      const soulstoneRevives: { playerId: string; position: Position }[] = [];
 
       // Update player cooldowns and mana regen
       for (const player of state.players) {
@@ -2470,6 +2471,12 @@ export class GameStateManager {
               player.stats.mana = Math.floor(player.stats.maxMana / 2);
               // Position stays the same (where they died)
 
+              // Track revive for client notification (sound/animation)
+              soulstoneRevives.push({
+                playerId: player.id,
+                position: { x: player.position.x, y: player.position.y }
+              });
+
               console.log(`[DEBUG] Player ${player.name} resurrected by Soulstone!`);
               continue; // Skip normal death handling
             }
@@ -2552,7 +2559,7 @@ export class GameStateManager {
       }
 
       this.lastUpdate.set(runId, now);
-      updates.set(runId, { state, events, tauntEvents, collectedItems });
+      updates.set(runId, { state, events, tauntEvents, collectedItems, soulstoneRevives });
     }
 
     return updates;
