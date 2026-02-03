@@ -95,14 +95,6 @@ export class InventoryUI {
   private tooltipBg: Phaser.GameObjects.Rectangle | null = null;
   private tooltipText: Phaser.GameObjects.Text | null = null;
 
-  // Collapsible set bonuses - rendered directly on scene, NOT in container
-  // (Phaser has issues with interactive elements inside containers - see BUG_FIXES_2026_02.md section 5)
-  private expandedSetId: string | null = null;
-  private setBonusElements: Phaser.GameObjects.GameObject[] = []; // Dynamic elements created each update
-  private bonusPanelX: number = 0;
-  private bonusPanelY: number = 0;
-  private bonusPanelW: number = 0;
-
   private readonly DEPTH = 1000;
   private cachedEquipmentIds: Map<EquipSlot, string | null> = new Map();
   private cachedStatsText: string = '';
@@ -281,12 +273,7 @@ export class InventoryUI {
     }));
     bonusHeader.setOrigin(0.5, 0.5);
 
-    // Store bonus panel coordinates for dynamic set display
-    this.bonusPanelX = bonusX;
-    this.bonusPanelY = topY + 45;
-    this.bonusPanelW = bonusW;
-
-    // Placeholder text for when no sets are equipped
+    // Bonus text - 14px
     this.setBonusText = this.addElement(this.scene.add.text(bonusX + 12, topY + 45, '', {
       fontFamily: FONTS.body, fontSize: '14px', color: '#88cc88', lineSpacing: 4,
       wordWrap: { width: bonusW - 24 },
@@ -641,21 +628,30 @@ export class InventoryUI {
       this.statText.setText(newStatsText);
     }
 
-    // Update set bonuses - collapsible system
-    // PERF: Only update when equipment actually changes, not every frame
+    // Update set bonuses
     const setCounts = countSetPieces(player.equipment);
-    // Check if equipment changed by comparing IDs
-    let equipmentChanged = false;
-    for (const [slot, item] of Object.entries(player.equipment)) {
-      const cachedId = this.cachedEquipmentIds.get(slot as EquipSlot);
-      const currentId = item?.id ?? null;
-      if (cachedId !== currentId) {
-        equipmentChanged = true;
-        break;
+    if (this.setBonusText) {
+      const bonusLines: string[] = [];
+      if (setCounts.size > 0) {
+        for (const [setId, count] of setCounts) {
+          bonusLines.push(`${SET_NAMES[setId] ?? setId}`);
+          bonusLines.push(`(${count}/5 pieces)`);
+          const bonuses = SET_BONUSES[setId];
+          if (bonuses) {
+            for (const bonus of bonuses) {
+              bonusLines.push((count >= bonus.pieces ? '✓ ' : '○ ') + bonus.desc);
+            }
+          }
+          bonusLines.push('');
+        }
+      } else {
+        bonusLines.push('No set bonuses');
+        bonusLines.push('');
+        bonusLines.push('Collect matching');
+        bonusLines.push('set pieces for');
+        bonusLines.push('bonuses!');
       }
-    }
-    if (equipmentChanged) {
-      this.updateCollapsibleSetBonuses(setCounts);
+      this.setBonusText.setText(bonusLines.join('\n'));
     }
 
     // Update backpack
@@ -694,167 +690,6 @@ export class InventoryUI {
         if (border) border.setFillStyle(0x2a2a4a);
         itemText.setText('');
       }
-    }
-  }
-
-  private updateCollapsibleSetBonuses(setCounts: Map<string, number>): void {
-    // CRITICAL: Render interactive elements DIRECTLY on scene, NOT in a container
-    // Phaser has issues with interactive elements inside containers - hit areas may be offset
-    // See BUG_FIXES_2026_02.md section 5 "UI Tooltip System - Common Pitfalls"
-
-    // PERF: Only update if set counts actually changed (this runs every frame!)
-    let setsChanged = setCounts.size !== this.cachedSetCounts.size;
-    if (!setsChanged) {
-      for (const [setId, count] of setCounts) {
-        if (this.cachedSetCounts.get(setId) !== count) {
-          setsChanged = true;
-          break;
-        }
-      }
-    }
-    if (!setsChanged && this.setBonusElements.length > 0) {
-      return; // No change, skip expensive rebuild
-    }
-
-    // Update cache
-    this.cachedSetCounts = new Map(setCounts);
-
-    // Clear old dynamic elements (destroy them completely)
-    for (const el of this.setBonusElements) {
-      el.destroy();
-    }
-    this.setBonusElements = [];
-
-    // Show placeholder text if no sets
-    if (setCounts.size === 0) {
-      if (this.setBonusText) {
-        this.setBonusText.setText('No set bonuses\n\nCollect matching\nset pieces for\nbonuses!');
-        this.setBonusText.setVisible(this.visible);
-      }
-      return;
-    }
-
-    // Hide placeholder when sets exist
-    if (this.setBonusText) {
-      this.setBonusText.setVisible(false);
-    }
-
-    // Auto-expand first set if nothing is expanded or current expansion is invalid
-    if (this.expandedSetId === null || !setCounts.has(this.expandedSetId)) {
-      this.expandedSetId = setCounts.keys().next().value ?? null;
-    }
-
-    let yOffset = 0;
-    const lineHeight = 20;
-    const headerHeight = 28;
-    const padding = 8;
-
-    for (const [setId, count] of setCounts) {
-      const isExpanded = this.expandedSetId === setId;
-      const setName = SET_NAMES[setId] ?? setId;
-
-      // Create clickable header background - DIRECTLY ON SCENE
-      const headerBg = this.scene.add.rectangle(
-        this.bonusPanelX + this.bonusPanelW / 2,
-        this.bonusPanelY + yOffset + headerHeight / 2,
-        this.bonusPanelW - 16,
-        headerHeight,
-        isExpanded ? 0x2a3a2a : 0x1a2a1a,
-        0.9
-      );
-      headerBg.setStrokeStyle(1, isExpanded ? 0x4a6a4a : 0x3a4a3a);
-      headerBg.setScrollFactor(0);
-      headerBg.setDepth(this.DEPTH + 1); // Above panel background
-      headerBg.setVisible(this.visible);
-      headerBg.setInteractive({ useHandCursor: true });
-      this.setBonusElements.push(headerBg);
-
-      // Header text
-      const arrow = isExpanded ? '▼' : '▶';
-      const headerText = this.scene.add.text(
-        this.bonusPanelX + 16,
-        this.bonusPanelY + yOffset + headerHeight / 2,
-        `${arrow} ${setName} (${count}/5)`,
-        {
-          fontFamily: FONTS.body,
-          fontSize: '14px',
-          color: isExpanded ? '#88ff88' : '#66cc66',
-          stroke: '#000000',
-          strokeThickness: 1
-        }
-      );
-      headerText.setOrigin(0, 0.5);
-      headerText.setScrollFactor(0);
-      headerText.setDepth(this.DEPTH + 2); // Above header bg
-      headerText.setVisible(this.visible);
-      this.setBonusElements.push(headerText);
-
-      // Click handler - capture variables for closure
-      const currentSetId = setId;
-      const capturedHeaderBg = headerBg;
-      const capturedHeaderText = headerText;
-
-      headerBg.on('pointerover', () => {
-        capturedHeaderBg.setFillStyle(0x3a4a3a);
-        capturedHeaderText.setColor('#aaffaa');
-      });
-      headerBg.on('pointerout', () => {
-        const expanded = this.expandedSetId === currentSetId;
-        capturedHeaderBg.setFillStyle(expanded ? 0x2a3a2a : 0x1a2a1a);
-        capturedHeaderText.setColor(expanded ? '#88ff88' : '#66cc66');
-      });
-      headerBg.on('pointerdown', () => {
-        this.toggleSetExpansion(currentSetId);
-      });
-
-      yOffset += headerHeight + 4;
-
-      // Show bonuses if expanded
-      if (isExpanded) {
-        const bonuses = SET_BONUSES[setId];
-        if (bonuses) {
-          for (const bonus of bonuses) {
-            const isActive = count >= bonus.pieces;
-            const symbol = isActive ? '✓' : '○';
-            const bonusText = this.scene.add.text(
-              this.bonusPanelX + 20,
-              this.bonusPanelY + yOffset,
-              `${symbol} ${bonus.desc}`,
-              {
-                fontFamily: FONTS.body,
-                fontSize: '13px',
-                color: isActive ? '#88cc88' : '#556655',
-                stroke: '#000000',
-                strokeThickness: 1,
-                wordWrap: { width: this.bonusPanelW - 40 }
-              }
-            );
-            bonusText.setScrollFactor(0);
-            bonusText.setDepth(this.DEPTH + 1);
-            bonusText.setVisible(this.visible);
-            this.setBonusElements.push(bonusText);
-            yOffset += lineHeight;
-          }
-        }
-        yOffset += padding;
-      }
-    }
-  }
-
-  private toggleSetExpansion(setId: string): void {
-    // Toggle: if already expanded, collapse it; otherwise expand it
-    if (this.expandedSetId === setId) {
-      // Keep it expanded (at least one should be expanded)
-      // Or toggle to collapse all - let's keep one always expanded for now
-      return;
-    }
-    this.expandedSetId = setId;
-
-    // Force re-render
-    const player = wsClient.getCurrentPlayer();
-    if (player) {
-      const setCounts = countSetPieces(player.equipment);
-      this.updateCollapsibleSetBonuses(setCounts);
     }
   }
 
@@ -915,10 +750,6 @@ export class InventoryUI {
     for (const el of this.allElements) {
       if ('setVisible' in el) (el as any).setVisible(false);
     }
-    // Also hide dynamic set bonus elements (rendered directly on scene)
-    for (const el of this.setBonusElements) {
-      if ('setVisible' in el) (el as any).setVisible(false);
-    }
     this.hideTooltip();
   }
 
@@ -928,9 +759,6 @@ export class InventoryUI {
 
   destroy(): void {
     for (const el of this.allElements) el.destroy();
-    // Also destroy dynamic set bonus elements
-    for (const el of this.setBonusElements) el.destroy();
-    this.setBonusElements = [];
     this.tooltip?.destroy();
   }
 }
