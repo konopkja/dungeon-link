@@ -1738,10 +1738,20 @@ export class GameScene extends Phaser.Scene {
     // Update shadow overlay for Shadow theme fog of war
     this.updateShadowOverlay(state.dungeon.theme, state.dungeon.themeModifiers);
 
-    // Update camera to follow current player
-    const playerForCamera = wsClient.getCurrentPlayer();
-    if (playerForCamera) {
-      this.cameras.main.centerOn(playerForCamera.position.x, playerForCamera.position.y);
+    // Update camera to follow current player's INTERPOLATED position (sprite position)
+    const currentPlayerId = wsClient.playerId;
+    if (currentPlayerId) {
+      const playerSprite = this.playerSprites.get(currentPlayerId);
+      if (playerSprite) {
+        // Follow the interpolated sprite position for smooth camera
+        this.cameras.main.centerOn(playerSprite.x, playerSprite.y);
+      } else {
+        // Fallback to server position if sprite not yet created
+        const playerForCamera = wsClient.getCurrentPlayer();
+        if (playerForCamera) {
+          this.cameras.main.centerOn(playerForCamera.position.x, playerForCamera.position.y);
+        }
+      }
     }
 
     // Render minimap
