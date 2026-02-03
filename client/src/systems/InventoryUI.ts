@@ -642,8 +642,21 @@ export class InventoryUI {
     }
 
     // Update set bonuses - collapsible system
+    // PERF: Only update when equipment actually changes, not every frame
     const setCounts = countSetPieces(player.equipment);
-    this.updateCollapsibleSetBonuses(setCounts);
+    // Check if equipment changed by comparing IDs
+    let equipmentChanged = false;
+    for (const [slot, item] of Object.entries(player.equipment)) {
+      const cachedId = this.cachedEquipmentIds.get(slot as EquipSlot);
+      const currentId = item?.id ?? null;
+      if (cachedId !== currentId) {
+        equipmentChanged = true;
+        break;
+      }
+    }
+    if (equipmentChanged) {
+      this.updateCollapsibleSetBonuses(setCounts);
+    }
 
     // Update backpack
     for (let i = 0; i < this.backpackSlots.length; i++) {
