@@ -13,21 +13,31 @@ interface RoomConnection {
 
 /**
  * Get enemy count range based on floor number.
- * Floors 1-2 have reduced enemy counts for better early game balance.
- * - Floor 1: 1-2 enemies per room
- * - Floor 2: 1-3 enemies per room
- * - Floor 3+: Normal range (ENEMIES_PER_ROOM_MIN to ENEMIES_PER_ROOM_MAX)
+ * Enemy counts scale with floor progression:
+ * - Floor 1:     1-2 enemies (tutorial)
+ * - Floor 2:     1-3 enemies (early game)
+ * - Floor 3-5:   2-5 enemies (standard)
+ * - Floor 6-9:   3-6 enemies (mid game)
+ * - Floor 10-14: 3-7 enemies (late game)
+ * - Floor 15+:   4-8 enemies (endgame)
  */
 function getEnemyCountRange(floor: number): { min: number; max: number } {
   if (floor === 1) {
     return { min: 1, max: 2 };
   } else if (floor === 2) {
     return { min: 1, max: 3 };
+  } else if (floor <= 5) {
+    // Standard range (floors 3-5)
+    return { min: 2, max: 5 };
+  } else if (floor <= 9) {
+    // Mid game scaling (floors 6-9)
+    return { min: 3, max: 6 };
+  } else if (floor <= 14) {
+    // Late game scaling (floors 10-14)
+    return { min: 3, max: 7 };
   } else {
-    return {
-      min: GAME_CONFIG.ENEMIES_PER_ROOM_MIN,
-      max: GAME_CONFIG.ENEMIES_PER_ROOM_MAX
-    };
+    // Endgame scaling (floor 15+)
+    return { min: 4, max: 8 };
   }
 }
 
@@ -730,9 +740,9 @@ function spawnPatrollingEnemies(
 
   if (roomsWithConnections.length === 0) return;
 
-  // Spawn 1-3 patrolling enemies based on floor level
-  // Floor 2-3: 1 patroller, Floor 4-6: 2 patrollers, Floor 7+: 3 patrollers
-  const numPatrollers = floor <= 3 ? 1 : floor <= 6 ? 2 : 3;
+  // Spawn patrolling enemies based on floor level
+  // Floor 2-3: 1 patroller, Floor 4-6: 2 patrollers, Floor 7-10: 3, Floor 11-14: 4, Floor 15+: 5
+  const numPatrollers = floor <= 3 ? 1 : floor <= 6 ? 2 : floor <= 10 ? 3 : floor <= 14 ? 4 : 5;
 
   const usedRooms = new Set<string>();
 

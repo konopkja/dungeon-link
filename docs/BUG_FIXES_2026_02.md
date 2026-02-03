@@ -1072,6 +1072,86 @@ Missing ANY of steps 1-3 can cause state leakage bugs.
 
 ---
 
+## 15. Floor-Based Enemy Count Scaling (2026-02-03)
+
+### Problem
+
+Higher floors (10+) felt empty compared to early floors. Enemy counts per room were capped at 2-5 from floor 3 onwards, with no scaling for late-game progression. This made floors 10-17+ feel easier than intended despite enemies being statistically stronger.
+
+### Root Cause
+
+The `getEnemyCountRange()` function only reduced enemy counts for early floors but never increased them for later floors:
+
+```typescript
+// OLD CODE - No scaling past floor 3
+function getEnemyCountRange(floor: number): { min: number; max: number } {
+  if (floor === 1) return { min: 1, max: 2 };
+  else if (floor === 2) return { min: 1, max: 3 };
+  else return { min: 2, max: 5 };  // Same for ALL floors 3+
+}
+```
+
+### Solution
+
+Implemented progressive enemy count scaling for higher floors:
+
+**Enemy Count Per Room:**
+| Floor Range | Min | Max | Description |
+|-------------|-----|-----|-------------|
+| 1           | 1   | 2   | Tutorial |
+| 2           | 1   | 3   | Early game |
+| 3-5         | 2   | 5   | Standard |
+| 6-9         | 3   | 6   | Mid game |
+| 10-14       | 3   | 7   | Late game |
+| 15+         | 4   | 8   | Endgame |
+
+**Patroller Count:**
+| Floor Range | Patrollers | Description |
+|-------------|------------|-------------|
+| 2-3         | 1          | Learning patrols |
+| 4-6         | 2          | Standard |
+| 7-10        | 3          | Challenging |
+| 11-14       | 4          | Late game |
+| 15+         | 5          | Endgame |
+
+### Key Code
+
+```typescript
+function getEnemyCountRange(floor: number): { min: number; max: number } {
+  if (floor === 1) {
+    return { min: 1, max: 2 };
+  } else if (floor === 2) {
+    return { min: 1, max: 3 };
+  } else if (floor <= 5) {
+    return { min: 2, max: 5 };  // Standard
+  } else if (floor <= 9) {
+    return { min: 3, max: 6 };  // Mid game
+  } else if (floor <= 14) {
+    return { min: 3, max: 7 };  // Late game
+  } else {
+    return { min: 4, max: 8 };  // Endgame
+  }
+}
+
+// Patroller scaling
+const numPatrollers = floor <= 3 ? 1 : floor <= 6 ? 2 : floor <= 10 ? 3 : floor <= 14 ? 4 : 5;
+```
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `server/src/game/DungeonGenerator.ts` | Updated `getEnemyCountRange()` and patroller count logic |
+
+### Balance Notes
+
+- Average enemies per room increases from ~3.5 (floor 3) to ~6 (floor 15+)
+- Combined with stat scaling (health/damage), this creates exponential difficulty curve
+- Patrollers add additional threat on higher floors
+- Elite spawn chance (20% on floor 3+) compounds with higher base counts
+
+---
+
 ## 14. Collapsible UI Elements Not Clickable (2026-02-03)
 
 ### Problem
