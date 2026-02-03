@@ -928,19 +928,23 @@ export class GameStateManager {
 
                 // FIX: Set initial cooldowns for boss abilities and AoE to prevent burst damage on aggro
                 // Without this, all boss abilities start at 0 cooldown and fire back-to-back
+                // FIX 2: Stagger abilities so they don't all come off cooldown at the same time
                 if (enemy.isBoss && enemy.bossId) {
                   const bossAbilities = getBossAbilitiesForFloor(enemy.bossId, state.floor);
-                  for (const abilityId of bossAbilities) {
+                  for (let i = 0; i < bossAbilities.length; i++) {
+                    const abilityId = bossAbilities[i];
                     const cdKey = `${enemy.id}_${abilityId}`;
-                    // Initial ability cooldown: 3-5 seconds (randomized to feel more natural)
-                    const initialCooldown = 3 + Math.random() * 2;
+                    // Staggered initial cooldowns: first ability at 4-5s, second at 7-8s, third at 10-11s, etc.
+                    // This prevents all abilities from coming off cooldown together
+                    const baseDelay = 4 + i * 3; // 4s, 7s, 10s, 13s...
+                    const initialCooldown = baseDelay + Math.random();
                     state.tracking.bossAbilityCooldowns.set(cdKey, initialCooldown);
                   }
-                  // Initial AoE cooldown: 4-6 seconds (slightly longer to give players time to position)
+                  // Initial AoE cooldown: 6-8 seconds (longer to give players time to position)
                   const aoECdKey = `${enemy.id}_aoe`;
-                  const initialAoECooldown = 4 + Math.random() * 2;
+                  const initialAoECooldown = 6 + Math.random() * 2;
                   state.tracking.bossAoECooldowns.set(aoECdKey, initialAoECooldown);
-                  console.log(`[DEBUG] Set initial boss cooldowns for ${enemy.name}: abilities=3-5s, AoE=4-6s`);
+                  console.log(`[DEBUG] Set staggered boss cooldowns for ${enemy.name}: abilities staggered from 4s, AoE=6-8s`);
                 }
 
                 // Ensure enemy position is inside the room (fix stuck enemies)
@@ -3125,6 +3129,10 @@ export class GameStateManager {
 
     // Clear all aggro times for new floor
     state.tracking.enemyAggroTimes.clear();
+
+    // Clear boss cooldowns from previous floor (new bosses will get fresh staggered cooldowns)
+    state.tracking.bossAbilityCooldowns.clear();
+    state.tracking.bossAoECooldowns.clear();
 
     // Increment floor
     state.floor++;
