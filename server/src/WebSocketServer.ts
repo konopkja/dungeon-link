@@ -3,6 +3,9 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { ClientMessage, ServerMessage, ClassName } from '@dungeon-link/shared';
 import { WS_CONFIG, GAME_CONFIG } from '@dungeon-link/shared';
 import { gameStateManager } from './game/GameState.js';
+
+// Set to true to enable verbose debug logging (CAUSES LAG - only for debugging)
+const DEBUG_LOGGING = false;
 import {
   handleWalletConnect,
   handleWalletDisconnect,
@@ -77,7 +80,7 @@ export class GameWebSocketServer {
 
     ws.on('message', (data) => {
       try {
-        console.log('[DEBUG] Received message:', data.toString().substring(0, 100));
+        if (DEBUG_LOGGING) console.log('[DEBUG] Received message:', data.toString().substring(0, 100));
         const message = JSON.parse(data.toString()) as ClientMessage;
         this.handleMessage(client, message);
       } catch (error) {
@@ -107,22 +110,22 @@ export class GameWebSocketServer {
     switch (message.type) {
       case 'CREATE_RUN': {
         try {
-          console.log('[DEBUG] Creating run for', message.playerName, message.classId);
+          if (DEBUG_LOGGING) console.log('[DEBUG] Creating run for', message.playerName, message.classId);
           const result = gameStateManager.createRun(message.playerName, message.classId);
-          console.log('[DEBUG] Run created:', result.runId);
+          if (DEBUG_LOGGING) console.log('[DEBUG] Run created:', result.runId);
           client.playerId = result.playerId;
           client.runId = result.runId;
 
           // Initialize crypto state for this run
           initializeCryptoState(result.runId);
 
-          console.log('[DEBUG] Sending RUN_CREATED response');
+          if (DEBUG_LOGGING) console.log('[DEBUG] Sending RUN_CREATED response');
           this.send(client.ws, {
             type: 'RUN_CREATED',
             runId: result.runId,
             state: result.state
           });
-          console.log('[DEBUG] RUN_CREATED sent successfully');
+          if (DEBUG_LOGGING) console.log('[DEBUG] RUN_CREATED sent successfully');
         } catch (error) {
           console.error('[ERROR] Failed to create run:', error);
         }
@@ -223,20 +226,20 @@ export class GameWebSocketServer {
       }
 
       case 'INTERACT_VENDOR': {
-        console.log('[DEBUG] INTERACT_VENDOR - playerId:', client.playerId, 'runId:', client.runId, 'vendorId:', message.vendorId);
+        if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - playerId:', client.playerId, 'runId:', client.runId, 'vendorId:', message.vendorId);
         if (!client.playerId || !client.runId) {
-          console.log('[DEBUG] INTERACT_VENDOR - missing playerId or runId');
+          if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - missing playerId or runId');
           return;
         }
         const services = gameStateManager.getVendorServices(client.playerId, message.vendorId);
-        console.log('[DEBUG] INTERACT_VENDOR - services:', services);
+        if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - services:', services);
         // Always send response, even if services is null (send empty array)
         this.send(client.ws, {
           type: 'VENDOR_SERVICES',
           vendorId: message.vendorId,
           services: services || []
         });
-        console.log('[DEBUG] INTERACT_VENDOR - sent VENDOR_SERVICES with', (services || []).length, 'services');
+        if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - sent VENDOR_SERVICES with', (services || []).length, 'services');
         break;
       }
 
