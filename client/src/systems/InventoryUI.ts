@@ -100,6 +100,7 @@ export class InventoryUI {
   private cachedStatsText: string = '';
   private cachedBackpackIds: string[] = [];
   private cachedSetCounts: Map<string, number> = new Map();
+  private expandedSets: Set<string> = new Set(); // Track which sets are expanded
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -273,12 +274,18 @@ export class InventoryUI {
     }));
     bonusHeader.setOrigin(0.5, 0.5);
 
-    // Bonus text - 14px
+    // Bonus text - 14px (interactive for collapsible sets)
     this.setBonusText = this.addElement(this.scene.add.text(bonusX + 12, topY + 45, '', {
       fontFamily: FONTS.body, fontSize: '14px', color: '#88cc88', lineSpacing: 4,
       wordWrap: { width: bonusW - 24 },
       stroke: '#000000', strokeThickness: 1
     }));
+
+    // Make bonus panel clickable for set expansion
+    bonusPanel.setInteractive({ useHandCursor: true });
+    bonusPanel.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      this.handleSetBonusClick(pointer, bonusX, topY + 45);
+    });
 
     // ===== BOTTOM: Full-width Backpack =====
     const bpY = topY + topH + 12;
@@ -414,6 +421,52 @@ export class InventoryUI {
     if (!player) return;
     const item = player.equipment[slot];
     if (item) wsClient.unequipItem(slot);
+  }
+
+  private handleSetBonusClick(pointer: Phaser.Input.Pointer, panelX: number, textStartY: number): void {
+    const player = wsClient.getCurrentPlayer();
+    if (!player) return;
+
+    const setCounts = countSetPieces(player.equipment);
+    if (setCounts.size === 0) return;
+
+    // Calculate which set was clicked based on y position
+    const clickY = pointer.y;
+    const lineHeight = 18; // Approximate line height (14px font + 4px spacing)
+    const relativeY = clickY - textStartY;
+
+    if (relativeY < 0) return;
+
+    // Calculate line number clicked
+    const lineClicked = Math.floor(relativeY / lineHeight);
+
+    // Determine which set the click corresponds to
+    let currentLine = 0;
+    for (const [setId, count] of setCounts) {
+      const isExpanded = this.expandedSets.has(setId);
+      const setHeaderLine = currentLine;
+      const setInfoLine = currentLine + 1;
+
+      // Check if click is on the set header or info line
+      if (lineClicked === setHeaderLine || lineClicked === setInfoLine) {
+        // Toggle this set's expansion
+        if (this.expandedSets.has(setId)) {
+          this.expandedSets.delete(setId);
+        } else {
+          this.expandedSets.add(setId);
+        }
+        this.update(); // Refresh display
+        return;
+      }
+
+      // Move past this set's lines
+      currentLine += 2; // Header + info line
+      if (isExpanded) {
+        const bonusCount = SET_BONUSES[setId]?.length ?? 0;
+        currentLine += bonusCount; // Bonus detail lines
+      }
+      currentLine += 1; // Empty line between sets
+    }
   }
 
   private showEquipmentTooltip(slot: EquipSlot, x: number, y: number): void {
@@ -628,22 +681,30 @@ export class InventoryUI {
       this.statText.setText(newStatsText);
     }
 
-    // Update set bonuses
+    // Update set bonuses with collapsible sections
     const setCounts = countSetPieces(player.equipment);
     if (this.setBonusText) {
       const bonusLines: string[] = [];
       if (setCounts.size > 0) {
         for (const [setId, count] of setCounts) {
-          bonusLines.push(`${SET_NAMES[setId] ?? setId}`);
-          bonusLines.push(`(${count}/5 pieces)`);
-          const bonuses = SET_BONUSES[setId];
-          if (bonuses) {
-            for (const bonus of bonuses) {
-              bonusLines.push((count >= bonus.pieces ? '✓ ' : '○ ') + bonus.desc);
+          const isExpanded = this.expandedSets.has(setId);
+          const arrow = isExpanded ? '▼' : '▶';
+          const activeBonusCount = SET_BONUSES[setId]?.filter(b => count >= b.pieces).length ?? 0;
+          bonusLines.push(`${arrow} ${SET_NAMES[setId] ?? setId}`);
+          bonusLines.push(`   (${count}/5) [${activeBonusCount} active]`);
+
+          // Only show bonus details if expanded
+          if (isExpanded) {
+            const bonuses = SET_BONUSES[setId];
+            if (bonuses) {
+              for (const bonus of bonuses) {
+                bonusLines.push('   ' + (count >= bonus.pieces ? '✓ ' : '○ ') + bonus.desc);
+              }
             }
           }
           bonusLines.push('');
         }
+        bonusLines.push('Click set name to expand');
       } else {
         bonusLines.push('No set bonuses');
         bonusLines.push('');

@@ -3,7 +3,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useWalletStatus, useRewardPool, formatEthDisplay } from './useWallet';
 import { wsClient } from '../network/WebSocketClient';
 import { formatEther } from 'viem';
-import { ClaimButton } from './ClaimButton';
+// ClaimButton removed - claim is now triggered via the ETH counter
 import { ClaimRewardsModal, ClaimError } from './ClaimRewardsModal';
 import { ClaimErrorModal } from './ClaimErrorModal';
 
@@ -38,7 +38,13 @@ function formatWeiDisplay(weiString: string): { amount: string; unit: string } {
 }
 
 // ETH counter component that displays accumulated ETH from boss chests
-export function AccumulatedEthCounter() {
+// Now clickable to initiate claim flow when eligible
+interface AccumulatedEthCounterProps {
+  canClaim?: boolean;
+  onClaimClick?: () => void;
+}
+
+export function AccumulatedEthCounter({ canClaim = false, onClaimClick }: AccumulatedEthCounterProps) {
   const [accumulatedEthWei, setAccumulatedEthWei] = useState('0');
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -66,17 +72,26 @@ export function AccumulatedEthCounter() {
 
   const { amount, unit } = formatWeiDisplay(accumulatedEthWei);
 
+  const handleClick = () => {
+    if (canClaim && onClaimClick) {
+      onClaimClick();
+    } else {
+      setShowTooltip(!showTooltip);
+    }
+  };
+
   return (
     <div
-      className="accumulated-eth-counter"
+      className={`accumulated-eth-counter ${canClaim ? 'claimable' : ''}`}
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
-      onClick={() => setShowTooltip(!showTooltip)}
+      onClick={handleClick}
     >
       <span className="eth-icon">◆</span>
       <span className="eth-amount">{amount}</span>
       <span className="eth-label">{unit}</span>
-      {showTooltip && (
+      {canClaim && <span className="claim-hint">CLAIM</span>}
+      {showTooltip && !canClaim && (
         <div className="eth-counter-tooltip">
           Collected from boss chests.<br />
           Reach Floor 15 solo to claim!
@@ -158,11 +173,12 @@ export function RewardPoolDisplay() {
 // Main wallet overlay component
 export function WalletOverlay() {
   const [accumulatedEthWei, setAccumulatedEthWei] = useState('0');
+  const [canClaim, setCanClaim] = useState(false);
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
   const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
   const [claimError, setClaimError] = useState<ClaimError | null>(null);
 
-  // Track accumulated ETH for claim modal
+  // Track accumulated ETH and claim eligibility for claim modal
   useEffect(() => {
     const unsubscribe = onWalletEvent('eth-drop-received', (detail) => {
       if (detail?.totalAccumulatedWei) {
@@ -172,27 +188,35 @@ export function WalletOverlay() {
 
     const unsubscribeReset = onWalletEvent('reset-accumulated-eth', () => {
       setAccumulatedEthWei('0');
+      setCanClaim(false);
       setIsClaimModalOpen(false);
+    });
+
+    // Listen for claim eligibility updates
+    const unsubscribeClaim = onWalletEvent('claim-eligible', (detail) => {
+      if (detail?.canClaim !== undefined) {
+        setCanClaim(detail.canClaim);
+      }
+    });
+
+    // Also check crypto state updates
+    const unsubscribeCryptoState = onWalletEvent('crypto-state-updated', (detail) => {
+      if (detail?.canClaim !== undefined) {
+        setCanClaim(detail.canClaim);
+      }
     });
 
     return () => {
       unsubscribe();
       unsubscribeReset();
+      unsubscribeClaim();
+      unsubscribeCryptoState();
     };
   }, []);
 
-  // Handle claim button click
+  // Handle claim click from ETH counter
   const handleClaimClick = useCallback(() => {
     setIsClaimModalOpen(true);
-  }, []);
-
-  // Handle connect button click (from ClaimButton)
-  const handleConnectClick = useCallback(() => {
-    // Trigger RainbowKit connect modal by clicking the hidden connect button
-    const connectBtn = document.querySelector('[data-testid="rk-connect-button"]') as HTMLButtonElement;
-    if (connectBtn) {
-      connectBtn.click();
-    }
   }, []);
 
   // Handle claim error
@@ -211,15 +235,12 @@ export function WalletOverlay() {
 
   return (
     <>
-      {/* Wallet connect, claim button, and ETH counter in header */}
+      {/* Wallet connect and ETH counter in header */}
       <div id="wallet-header-mount">
-        <div className="eth-claim-stack">
-          <AccumulatedEthCounter />
-          <ClaimButton
-            onClaimClick={handleClaimClick}
-            onConnectClick={handleConnectClick}
-          />
-        </div>
+        <AccumulatedEthCounter
+          canClaim={canClaim}
+          onClaimClick={handleClaimClick}
+        />
         <WalletConnectButton />
       </div>
       {/* Pool display updater - updates vault DOM elements */}
@@ -261,15 +282,8 @@ export function injectWalletStyles() {
       right: 16px;
       z-index: 1000;
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 12px;
-    }
-
-    .eth-claim-stack {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 8px;
     }
 
     .accumulated-eth-counter {
@@ -284,6 +298,7 @@ export function injectWalletStyles() {
       font-family: 'Cinzel', serif;
       animation: ethCounterPulse 2s ease-in-out infinite;
       cursor: pointer;
+      transition: all 0.3s ease;
     }
 
     .accumulated-eth-counter .eth-icon {
@@ -304,6 +319,48 @@ export function injectWalletStyles() {
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+    }
+
+    /* Claimable state - gold/yellow color to indicate action available */
+    .accumulated-eth-counter.claimable {
+      background: linear-gradient(135deg, rgba(255, 215, 0, 0.25) 0%, rgba(255, 165, 0, 0.15) 100%);
+      border: 2px solid #ffd700;
+      animation: claimablePulse 1.5s ease-in-out infinite;
+    }
+
+    .accumulated-eth-counter.claimable .eth-icon,
+    .accumulated-eth-counter.claimable .eth-amount {
+      color: #ffd700;
+      text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
+    }
+
+    .accumulated-eth-counter.claimable .eth-label {
+      color: rgba(255, 215, 0, 0.9);
+    }
+
+    .accumulated-eth-counter .claim-hint {
+      color: #ffd700;
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-left: 6px;
+      animation: claimHintPulse 1s ease-in-out infinite;
+    }
+
+    @keyframes claimablePulse {
+      0%, 100% { box-shadow: 0 0 12px rgba(255, 215, 0, 0.4); }
+      50% { box-shadow: 0 0 24px rgba(255, 215, 0, 0.7); }
+    }
+
+    @keyframes claimHintPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .accumulated-eth-counter.claimable:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
     }
 
     .eth-counter-tooltip {
