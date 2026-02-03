@@ -15,6 +15,7 @@ import { WalletOverlay, injectWalletStyles } from './WalletUI';
 import { CryptoVendorModalManager } from './CryptoVendorModal';
 import { VendorModalManager } from './VendorModal';
 import { injectGameModalStyles } from './GameModal';
+import { initCryptoMessageHandler } from './cryptoMessageHandler';
 
 let walletRoot: ReturnType<typeof createRoot> | null = null;
 
@@ -22,6 +23,9 @@ export function initWalletUI() {
   // Inject styles
   injectWalletStyles();
   injectGameModalStyles();
+
+  // Initialize crypto message handler (listens for server messages)
+  initCryptoMessageHandler();
 
   // Create mount point if it doesn't exist
   let mountPoint = document.getElementById('wallet-root');

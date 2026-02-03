@@ -204,10 +204,10 @@ export const BOSSES: BossDefinition[] = [
     abilities: ['titan_slam', 'meteor', 'divine_shield'],
     mechanics: [
       {
-        id: 'titan_slam',
-        name: 'Cataclysm Strike',
-        description: 'Massive destruction every 15 seconds',
-        intervalSeconds: 15
+        id: 'tectonic_shift',
+        name: 'Tectonic Shift',
+        description: 'Splits arena into 4 quadrants - find the GREEN safe zone or take massive damage!',
+        intervalSeconds: 12
       },
       {
         id: 'meteor',
@@ -240,10 +240,10 @@ export const BOSSES: BossDefinition[] = [
     abilities: ['tentacle_slam', 'insanity', 'eye_beam'],
     mechanics: [
       {
-        id: 'insanity',
-        name: 'Echoes of Oblivion',
-        description: 'Fractures sanity with whispers from beyond',
-        intervalSeconds: 25
+        id: 'void_gaze',
+        name: 'Void Gaze',
+        description: 'A sweeping cone of annihilation - dodge the eye or be erased! (Solo challenge)',
+        intervalSeconds: 10
       },
       {
         id: 'tentacles',
@@ -252,10 +252,10 @@ export const BOSSES: BossDefinition[] = [
         triggerHealthPercent: 60
       },
       {
-        id: 'eye_beam',
-        name: 'Gaze of Annihilation',
-        description: 'A look that erases existence',
-        intervalSeconds: 18
+        id: 'insanity',
+        name: 'Echoes of Oblivion',
+        description: 'Fractures sanity with whispers from beyond every 25 seconds',
+        intervalSeconds: 25
       }
     ],
     lootTable: [

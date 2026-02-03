@@ -4563,6 +4563,148 @@ export class GameScene extends Phaser.Scene {
         container.add(glow);
         break;
       }
+
+      case GroundEffectType.TectonicQuadrant: {
+        // Tectonic Shift: 4 quadrants with clear safe/danger indication
+        const safeQuadrant = effect.safeQuadrant ?? 0;
+        const radius = effect.radius;
+
+        // Create 4 quadrant wedges
+        for (let i = 0; i < 4; i++) {
+          const isSafe = i === safeQuadrant;
+          const quadColor = isSafe ? 0x00ff00 : 0xff0000; // Green safe, red danger
+          const startAngle = (i * Math.PI / 2) - Math.PI; // Start from west, go counterclockwise
+
+          // Create wedge using graphics
+          const wedge = this.add.graphics();
+          wedge.fillStyle(quadColor, isSafe ? 0.15 : 0.25);
+          wedge.lineStyle(3, quadColor, 0.8);
+          wedge.beginPath();
+          wedge.moveTo(0, 0);
+          wedge.arc(0, 0, radius, startAngle, startAngle + Math.PI / 2, false);
+          wedge.closePath();
+          wedge.fillPath();
+          wedge.strokePath();
+          wedge.setName(`quadrant_${i}`);
+          container.add(wedge);
+
+          // Add icon in each quadrant to make it clearer
+          const iconAngle = startAngle + Math.PI / 4;
+          const iconDist = radius * 0.6;
+          const iconX = Math.cos(iconAngle) * iconDist;
+          const iconY = Math.sin(iconAngle) * iconDist;
+
+          const icon = this.add.text(iconX, iconY, isSafe ? '✓' : '✗', {
+            fontSize: '32px',
+            color: isSafe ? '#00ff00' : '#ff0000',
+            fontStyle: 'bold'
+          }).setOrigin(0.5);
+          icon.setName(`icon_${i}`);
+          container.add(icon);
+        }
+
+        // Center indicator
+        const center = this.add.circle(0, 0, 15, color, 0.5);
+        center.setStrokeStyle(2, color, 1);
+        center.setName('center');
+        container.add(center);
+
+        // Telegraph text
+        const telegraphText = this.add.text(0, -radius - 30, 'TECTONIC SHIFT!', {
+          fontSize: '24px',
+          color: '#ffcc00',
+          fontStyle: 'bold',
+          stroke: '#000000',
+          strokeThickness: 3
+        }).setOrigin(0.5);
+        telegraphText.setName('telegraph_text');
+        container.add(telegraphText);
+        break;
+      }
+
+      case GroundEffectType.VoidGaze: {
+        // Void Gaze: Cone telegraph that shows where the boss will look
+        const coneAngle = effect.coneAngle ?? Math.PI / 3;
+        const coneDirection = effect.coneDirection ?? 0;
+        const radius = effect.radius;
+
+        // Create cone using graphics - draw pointing RIGHT, use container rotation for direction
+        // This is more performant than redrawing the cone every frame
+        const cone = this.add.graphics();
+        cone.fillStyle(color, 0.2);
+        cone.lineStyle(4, color, 0.8);
+        cone.beginPath();
+        cone.moveTo(0, 0);
+        cone.arc(0, 0, radius, -coneAngle / 2, coneAngle / 2, false); // Point right (0 degrees)
+        cone.closePath();
+        cone.fillPath();
+        cone.strokePath();
+        cone.setName('cone');
+        (cone as any)._wasActive = false; // Track state for optimization
+        container.add(cone);
+
+        // Set initial rotation
+        container.setRotation(coneDirection);
+
+        // Eye icon at center
+        const eyeGlow = this.add.circle(0, 0, 25, color, 0.6);
+        eyeGlow.setName('eye_glow');
+        container.add(eyeGlow);
+
+        const eyeText = this.add.text(0, 0, '👁', {
+          fontSize: '36px'
+        }).setOrigin(0.5);
+        eyeText.setName('eye_icon');
+        container.add(eyeText);
+
+        // Warning text
+        const warningText = this.add.text(0, -50, 'DODGE THE GAZE!', {
+          fontSize: '20px',
+          color: '#ff00ff',
+          fontStyle: 'bold',
+          stroke: '#000000',
+          strokeThickness: 3
+        }).setOrigin(0.5);
+        warningText.setName('warning_text');
+        container.add(warningText);
+        break;
+      }
+
+      case GroundEffectType.EncroachingDarkness: {
+        // Encroaching Darkness: Outer ring that shrinks the safe zone
+        const innerRadius = effect.innerRadius ?? 0;
+
+        // Outer danger ring
+        const outerRing = this.add.graphics();
+        outerRing.fillStyle(0x220033, 0.7);
+        outerRing.beginPath();
+        // Draw donut shape (outer circle minus inner circle)
+        outerRing.arc(0, 0, effect.radius, 0, Math.PI * 2);
+        outerRing.arc(0, 0, effect.radius - innerRadius, 0, Math.PI * 2, true);
+        outerRing.closePath();
+        outerRing.fillPath();
+        outerRing.setName('outer_ring');
+        container.add(outerRing);
+
+        // Inner safe zone indicator
+        const safeZone = this.add.circle(0, 0, effect.radius - innerRadius, 0x00ff00, 0.1);
+        safeZone.setStrokeStyle(3, 0x00ff00, 0.5);
+        safeZone.setName('safe_zone');
+        container.add(safeZone);
+
+        // Warning particles at the edge
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2;
+          const particle = this.add.circle(
+            Math.cos(angle) * effect.radius,
+            Math.sin(angle) * effect.radius,
+            5, 0x8800ff, 0.8
+          );
+          particle.setName(`particle_${i}`);
+          container.add(particle);
+        }
+        break;
+      }
     }
 
     // Add warning indicator for new effects
@@ -4624,11 +4766,159 @@ export class GameScene extends Phaser.Scene {
         }
         break;
       }
+
+      case GroundEffectType.TectonicQuadrant: {
+        // Update quadrant visuals based on active state
+        const isActive = effect.isActive ?? false;
+        const safeQuadrant = effect.safeQuadrant ?? 0;
+
+        for (let i = 0; i < 4; i++) {
+          const quadrant = container.getByName(`quadrant_${i}`) as Phaser.GameObjects.Graphics;
+          const icon = container.getByName(`icon_${i}`) as Phaser.GameObjects.Text;
+
+          if (quadrant && icon) {
+            const isSafe = i === safeQuadrant;
+            if (isActive) {
+              // During active phase, danger quadrants pulse red intensely
+              if (!isSafe) {
+                const pulse = 0.3 + Math.sin(this.time.now / 100) * 0.15;
+                quadrant.setAlpha(pulse);
+                icon.setAlpha(1);
+              } else {
+                quadrant.setAlpha(0.4); // Safe zone more visible
+                icon.setAlpha(1);
+              }
+            } else {
+              // Telegraph phase - flash to draw attention
+              const flash = 0.5 + Math.sin(this.time.now / 150) * 0.3;
+              quadrant.setAlpha(flash * (isSafe ? 0.3 : 0.5));
+              icon.setAlpha(flash);
+            }
+          }
+        }
+
+        // Update telegraph text
+        const telegraphText = container.getByName('telegraph_text') as Phaser.GameObjects.Text;
+        if (telegraphText) {
+          if (isActive) {
+            telegraphText.setText('MOVE!');
+            telegraphText.setColor('#ff0000');
+          } else {
+            const remaining = Math.ceil(effect.telegraphTime ?? 0);
+            telegraphText.setText(`TECTONIC SHIFT IN ${remaining}!`);
+          }
+        }
+        break;
+      }
+
+      case GroundEffectType.VoidGaze: {
+        // Update cone direction and visual state
+        const cone = container.getByName('cone') as Phaser.GameObjects.Graphics;
+        const eyeGlow = container.getByName('eye_glow') as Phaser.GameObjects.Arc;
+        const warningText = container.getByName('warning_text') as Phaser.GameObjects.Text;
+        const isActive = effect.isActive ?? false;
+        const coneDirection = effect.coneDirection ?? 0;
+        const coneAngle = effect.coneAngle ?? Math.PI / 3;
+        const radius = effect.radius;
+
+        // Use container rotation instead of redrawing the cone every frame
+        // This is MUCH more performant than clear() + redraw
+        container.setRotation(coneDirection);
+
+        if (cone) {
+          // Only update visual style when active state changes (not every frame)
+          const wasActive = (cone as any)._wasActive;
+          if (wasActive !== isActive) {
+            cone.clear();
+            const color = parseInt(effect.color.replace('#', ''), 16);
+
+            if (isActive) {
+              // Active phase - bright and dangerous
+              cone.fillStyle(color, 0.5);
+              cone.lineStyle(6, 0xff0000, 1);
+            } else {
+              // Telegraph phase - warning color
+              cone.fillStyle(color, 0.2);
+              cone.lineStyle(4, color, 0.6);
+            }
+
+            // Draw cone pointing right (rotation handles direction)
+            cone.beginPath();
+            cone.moveTo(0, 0);
+            cone.arc(0, 0, radius, -coneAngle / 2, coneAngle / 2, false);
+            cone.closePath();
+            cone.fillPath();
+            cone.strokePath();
+            (cone as any)._wasActive = isActive;
+          }
+        }
+
+        if (eyeGlow) {
+          // Pulse the eye during active phase
+          if (isActive) {
+            const pulse = 1 + Math.sin(this.time.now / 80) * 0.3;
+            eyeGlow.setScale(pulse);
+            eyeGlow.setFillStyle(0xff0000, 0.8);
+          } else {
+            eyeGlow.setScale(1);
+          }
+        }
+
+        if (warningText) {
+          if (isActive) {
+            warningText.setText('ANNIHILATION!');
+            warningText.setColor('#ff0000');
+          } else {
+            const remaining = (effect.telegraphTime ?? 0).toFixed(1);
+            warningText.setText(`GAZE IN ${remaining}s!`);
+          }
+        }
+        break;
+      }
+
+      case GroundEffectType.EncroachingDarkness: {
+        // Update the shrinking safe zone
+        const outerRing = container.getByName('outer_ring') as Phaser.GameObjects.Graphics;
+        const safeZone = container.getByName('safe_zone') as Phaser.GameObjects.Arc;
+        const innerRadius = effect.innerRadius ?? 0;
+
+        if (outerRing) {
+          outerRing.clear();
+          outerRing.fillStyle(0x220033, 0.7);
+          outerRing.beginPath();
+          outerRing.arc(0, 0, effect.radius, 0, Math.PI * 2);
+          outerRing.arc(0, 0, Math.max(10, effect.radius - innerRadius), 0, Math.PI * 2, true);
+          outerRing.closePath();
+          outerRing.fillPath();
+        }
+
+        if (safeZone) {
+          safeZone.setRadius(Math.max(10, effect.radius - innerRadius));
+        }
+
+        // Update particle positions
+        for (let i = 0; i < 8; i++) {
+          const particle = container.getByName(`particle_${i}`) as Phaser.GameObjects.Arc;
+          if (particle) {
+            const angle = (i / 8) * Math.PI * 2 + this.time.now / 1000;
+            const particleRadius = effect.radius - innerRadius + 10;
+            particle.setPosition(
+              Math.cos(angle) * particleRadius,
+              Math.sin(angle) * particleRadius
+            );
+          }
+        }
+        break;
+      }
     }
 
-    // Pulse effect for all types
-    const pulseAmount = 1 + Math.sin(this.time.now / 200) * 0.1;
-    container.setScale(pulseAmount);
+    // Pulse effect for standard types only (not quadrant/gaze which have custom pulses)
+    if (effect.type !== GroundEffectType.TectonicQuadrant &&
+        effect.type !== GroundEffectType.VoidGaze &&
+        effect.type !== GroundEffectType.EncroachingDarkness) {
+      const pulseAmount = 1 + Math.sin(this.time.now / 200) * 0.1;
+      container.setScale(pulseAmount);
+    }
 
     // Fade as duration decreases
     if (effect.duration < 1) {

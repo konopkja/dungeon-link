@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useWalletStatus, useRewardPool, formatEthDisplay } from './useWallet';
 import { wsClient } from '../network/WebSocketClient';
 import { formatEther } from 'viem';
+import { ClaimButton } from './ClaimButton';
+import { ClaimRewardsModal, ClaimError } from './ClaimRewardsModal';
+import { ClaimErrorModal } from './ClaimErrorModal';
 
 // Global event system to communicate with Phaser
 const walletEvents = new EventTarget();
@@ -154,15 +157,90 @@ export function RewardPoolDisplay() {
 
 // Main wallet overlay component
 export function WalletOverlay() {
+  const [accumulatedEthWei, setAccumulatedEthWei] = useState('0');
+  const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
+  const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
+  const [claimError, setClaimError] = useState<ClaimError | null>(null);
+
+  // Track accumulated ETH for claim modal
+  useEffect(() => {
+    const unsubscribe = onWalletEvent('eth-drop-received', (detail) => {
+      if (detail?.totalAccumulatedWei) {
+        setAccumulatedEthWei(detail.totalAccumulatedWei);
+      }
+    });
+
+    const unsubscribeReset = onWalletEvent('reset-accumulated-eth', () => {
+      setAccumulatedEthWei('0');
+      setIsClaimModalOpen(false);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeReset();
+    };
+  }, []);
+
+  // Handle claim button click
+  const handleClaimClick = useCallback(() => {
+    setIsClaimModalOpen(true);
+  }, []);
+
+  // Handle connect button click (from ClaimButton)
+  const handleConnectClick = useCallback(() => {
+    // Trigger RainbowKit connect modal by clicking the hidden connect button
+    const connectBtn = document.querySelector('[data-testid="rk-connect-button"]') as HTMLButtonElement;
+    if (connectBtn) {
+      connectBtn.click();
+    }
+  }, []);
+
+  // Handle claim error
+  const handleClaimError = useCallback((error: ClaimError) => {
+    setClaimError(error);
+    setIsClaimModalOpen(false);
+    setIsErrorModalOpen(true);
+  }, []);
+
+  // Handle retry from error modal
+  const handleRetry = useCallback(() => {
+    setIsErrorModalOpen(false);
+    setClaimError(null);
+    setIsClaimModalOpen(true);
+  }, []);
+
   return (
     <>
-      {/* Wallet connect and ETH counter in header */}
+      {/* Wallet connect, claim button, and ETH counter in header */}
       <div id="wallet-header-mount">
+        <ClaimButton
+          onClaimClick={handleClaimClick}
+          onConnectClick={handleConnectClick}
+        />
         <AccumulatedEthCounter />
         <WalletConnectButton />
       </div>
       {/* Pool display updater - updates vault DOM elements */}
       <RewardPoolDisplay />
+
+      {/* Claim rewards modal */}
+      <ClaimRewardsModal
+        isOpen={isClaimModalOpen}
+        onClose={() => setIsClaimModalOpen(false)}
+        accumulatedEthWei={accumulatedEthWei}
+        onError={handleClaimError}
+      />
+
+      {/* Error modal */}
+      <ClaimErrorModal
+        isOpen={isErrorModalOpen}
+        error={claimError}
+        onClose={() => {
+          setIsErrorModalOpen(false);
+          setClaimError(null);
+        }}
+        onRetry={handleRetry}
+      />
     </>
   );
 }
@@ -556,6 +634,482 @@ export function injectWalletStyles() {
 
     .close-vendor-btn:hover {
       background: #555;
+    }
+
+    /* ========================================
+       CLAIM BUTTON STYLES
+       ======================================== */
+
+    .claim-button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-family: 'Cinzel', serif;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 1px solid;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .claim-button .claim-icon {
+      font-size: 16px;
+    }
+
+    .claim-button-ready {
+      background: linear-gradient(135deg, rgba(74, 222, 128, 0.2) 0%, rgba(34, 197, 94, 0.15) 100%);
+      border-color: #4ade80;
+      color: #4ade80;
+      animation: claimPulse 2s ease-in-out infinite;
+    }
+
+    .claim-button-ready:hover {
+      background: linear-gradient(135deg, rgba(74, 222, 128, 0.3) 0%, rgba(34, 197, 94, 0.25) 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(74, 222, 128, 0.3);
+    }
+
+    .claim-button-connect {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(109, 40, 217, 0.15) 100%);
+      border-color: #8b5cf6;
+      color: #8b5cf6;
+    }
+
+    .claim-button-connect:hover {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.3) 0%, rgba(109, 40, 217, 0.25) 100%);
+      transform: translateY(-1px);
+    }
+
+    .claim-button-disabled {
+      background: rgba(100, 100, 100, 0.1);
+      border-color: rgba(150, 150, 150, 0.3);
+      color: rgba(150, 150, 150, 0.6);
+      cursor: not-allowed;
+    }
+
+    @keyframes claimPulse {
+      0%, 100% { box-shadow: 0 0 8px rgba(74, 222, 128, 0.2); }
+      50% { box-shadow: 0 0 20px rgba(74, 222, 128, 0.5); }
+    }
+
+    /* ========================================
+       CLAIM MODAL STYLES
+       ======================================== */
+
+    .claim-modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 2000;
+      backdrop-filter: blur(4px);
+    }
+
+    .claim-modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border: 2px solid #4ade80;
+      border-radius: 16px;
+      padding: 32px;
+      color: #fff;
+      font-family: 'Crimson Text', Georgia, serif;
+      z-index: 2001;
+      min-width: 380px;
+      max-width: 450px;
+      box-shadow: 0 8px 32px rgba(74, 222, 128, 0.3);
+    }
+
+    .claim-title {
+      font-family: 'Cinzel', serif;
+      font-size: 24px;
+      text-align: center;
+      margin: 0 0 24px 0;
+      color: #4ade80;
+      text-shadow: 0 0 10px rgba(74, 222, 128, 0.3);
+    }
+
+    .reward-breakdown {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+
+    .reward-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all 0.5s ease;
+    }
+
+    .reward-row.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .reward-label {
+      font-size: 16px;
+      color: #a0a0a0;
+    }
+
+    .reward-value {
+      font-family: 'Cinzel', serif;
+      font-size: 20px;
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .reward-unit {
+      font-size: 14px;
+      color: #a0a0a0;
+      margin-left: 6px;
+    }
+
+    .pool-row .reward-label {
+      color: #8b5cf6;
+    }
+
+    .pool-value {
+      color: #8b5cf6 !important;
+    }
+
+    .reward-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #4ade80, transparent);
+      margin: 8px 0;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    .reward-divider.visible {
+      opacity: 1;
+    }
+
+    .total-row .reward-label {
+      font-family: 'Cinzel', serif;
+      font-weight: bold;
+      color: #4ade80;
+    }
+
+    .total-value {
+      font-size: 28px !important;
+      color: #4ade80 !important;
+      text-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
+    }
+
+    .claim-action-btn {
+      width: 100%;
+      padding: 16px;
+      border: 2px solid #4ade80;
+      background: linear-gradient(135deg, rgba(74, 222, 128, 0.2) 0%, rgba(74, 222, 128, 0.1) 100%);
+      color: #4ade80;
+      border-radius: 8px;
+      font-family: 'Cinzel', serif;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      opacity: 0.5;
+    }
+
+    .claim-action-btn.ready {
+      opacity: 1;
+    }
+
+    .claim-action-btn.ready:hover {
+      background: linear-gradient(135deg, rgba(74, 222, 128, 0.3) 0%, rgba(74, 222, 128, 0.2) 100%);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(74, 222, 128, 0.4);
+    }
+
+    .claim-action-btn:disabled {
+      cursor: not-allowed;
+    }
+
+    .claim-cancel-btn {
+      width: 100%;
+      padding: 12px;
+      margin-top: 12px;
+      background: transparent;
+      border: 1px solid #444;
+      color: #888;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+
+    .claim-cancel-btn:hover {
+      border-color: #666;
+      color: #aaa;
+    }
+
+    /* ========================================
+       CLAIM SUCCESS STYLES
+       ======================================== */
+
+    .claim-success {
+      text-align: center;
+    }
+
+    .success-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      animation: successBounce 0.6s ease;
+    }
+
+    @keyframes successBounce {
+      0% { transform: scale(0); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+
+    .success-title {
+      font-family: 'Cinzel', serif;
+      font-size: 28px;
+      color: #4ade80;
+      margin: 0 0 20px 0;
+      text-shadow: 0 0 15px rgba(74, 222, 128, 0.5);
+    }
+
+    .success-amount {
+      margin-bottom: 20px;
+    }
+
+    .success-amount .amount-value {
+      font-family: 'Cinzel', serif;
+      font-size: 36px;
+      font-weight: bold;
+      color: #4ade80;
+      text-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
+    }
+
+    .success-amount .amount-unit {
+      font-size: 20px;
+      color: #4ade80;
+      margin-left: 8px;
+    }
+
+    .tx-link {
+      display: inline-block;
+      padding: 10px 20px;
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid #8b5cf6;
+      border-radius: 6px;
+      color: #8b5cf6;
+      text-decoration: none;
+      font-size: 14px;
+      transition: all 0.2s ease;
+      margin-bottom: 20px;
+    }
+
+    .tx-link:hover {
+      background: rgba(139, 92, 246, 0.2);
+      transform: translateY(-1px);
+    }
+
+    .close-btn {
+      width: 100%;
+      padding: 14px;
+      background: #333;
+      border: none;
+      color: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.2s ease;
+    }
+
+    .close-btn:hover {
+      background: #444;
+    }
+
+    /* ========================================
+       CONFETTI STYLES
+       ======================================== */
+
+    .confetti-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .confetti-particle {
+      position: absolute;
+      top: -10px;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      animation: confettiFall 3s ease-out forwards;
+    }
+
+    @keyframes confettiFall {
+      0% {
+        transform: translateY(0) rotate(0deg);
+        opacity: 1;
+      }
+      100% {
+        transform: translateY(400px) rotate(720deg);
+        opacity: 0;
+      }
+    }
+
+    /* ========================================
+       ERROR MODAL STYLES
+       ======================================== */
+
+    .error-modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 2002;
+      backdrop-filter: blur(4px);
+    }
+
+    .error-modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d1f1f 100%);
+      border: 2px solid #f87171;
+      border-radius: 16px;
+      padding: 32px;
+      color: #fff;
+      font-family: 'Crimson Text', Georgia, serif;
+      z-index: 2003;
+      min-width: 380px;
+      max-width: 450px;
+      box-shadow: 0 8px 32px rgba(248, 113, 113, 0.2);
+    }
+
+    .error-icon {
+      font-size: 48px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+
+    .error-title {
+      font-family: 'Cinzel', serif;
+      font-size: 22px;
+      text-align: center;
+      margin: 0 0 20px 0;
+      color: #f87171;
+    }
+
+    .error-content {
+      margin-bottom: 24px;
+    }
+
+    .error-message {
+      font-size: 16px;
+      color: #e0e0e0;
+      margin: 0 0 16px 0;
+      line-height: 1.5;
+    }
+
+    .error-suggestion-box {
+      display: flex;
+      gap: 12px;
+      background: rgba(74, 222, 128, 0.1);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .suggestion-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .error-suggestion {
+      font-size: 14px;
+      color: #4ade80;
+      margin: 0;
+      line-height: 1.4;
+    }
+
+    .error-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .error-retry-btn {
+      flex: 1;
+      padding: 14px;
+      background: linear-gradient(135deg, rgba(74, 222, 128, 0.2) 0%, rgba(74, 222, 128, 0.1) 100%);
+      border: 2px solid #4ade80;
+      color: #4ade80;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: 'Cinzel', serif;
+      font-size: 16px;
+      font-weight: bold;
+      transition: all 0.2s ease;
+    }
+
+    .error-retry-btn:hover {
+      background: linear-gradient(135deg, rgba(74, 222, 128, 0.3) 0%, rgba(74, 222, 128, 0.2) 100%);
+    }
+
+    .error-close-btn {
+      flex: 1;
+      padding: 14px;
+      background: #333;
+      border: 1px solid #444;
+      color: #aaa;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.2s ease;
+    }
+
+    .error-close-btn:hover {
+      background: #444;
+      color: #fff;
+    }
+
+    .error-help {
+      text-align: center;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid #333;
+    }
+
+    .error-help p {
+      margin: 0;
+      font-size: 13px;
+      color: #888;
+    }
+
+    .help-link {
+      color: #8b5cf6;
+      text-decoration: none;
+    }
+
+    .help-link:hover {
+      text-decoration: underline;
     }
   `;
   document.head.appendChild(style);

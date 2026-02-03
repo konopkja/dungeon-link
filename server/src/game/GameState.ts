@@ -16,6 +16,9 @@ import { getBossAbilitiesForFloor } from '../data/bosses.js';
 import { awardXP, getEnemyXP, initializePlayerLevel } from '../data/leveling.js';
 import { hasSetEffect } from '../data/sets.js';
 
+// Set to true to enable verbose debug logging (CAUSES LAG - only for debugging)
+const DEBUG_LOGGING = false;
+
 export class GameStateManager {
   private runs: Map<string, RunState> = new Map();
   private playerToRun: Map<string, string> = new Map();
@@ -999,7 +1002,7 @@ export class GameStateManager {
             for (const enemy of room.enemies) {
               if (enemy.isPatrolling) {
                 patrolCount++;
-                console.log(`[DEBUG] Patrol ${enemy.name} in ${room.id}, pos=(${Math.round(enemy.position.x)},${Math.round(enemy.position.y)}), waypoint=${enemy.currentWaypointIndex}/${enemy.patrolWaypoints?.length || 0}`);
+                if (DEBUG_LOGGING) console.log(`[DEBUG] Patrol ${enemy.name} in ${room.id}, pos=(${Math.round(enemy.position.x)},${Math.round(enemy.position.y)}), waypoint=${enemy.currentWaypointIndex}/${enemy.patrolWaypoints?.length || 0}`);
               }
             }
           }
@@ -1025,7 +1028,7 @@ export class GameStateManager {
 
             if (inCurrentRoom) {
               patrolsToMove.push(enemy);
-              console.log(`[DEBUG] Patrol ${enemy.name} detected in player room! pos=(${Math.round(enemy.position.x)},${Math.round(enemy.position.y)}) room bounds=(${currentRoom.x},${currentRoom.y},${currentRoom.width}x${currentRoom.height})`);
+              if (DEBUG_LOGGING) console.log(`[DEBUG] Patrol ${enemy.name} detected in player room! pos=(${Math.round(enemy.position.x)},${Math.round(enemy.position.y)}) room bounds=(${currentRoom.x},${currentRoom.y},${currentRoom.width}x${currentRoom.height})`);
             }
           }
 
@@ -1386,7 +1389,7 @@ export class GameStateManager {
             state.tracking.enemyAggroTimes.delete(enemy.id);
             // Reset attack cooldown so enemy doesn't immediately attack
             state.tracking.attackCooldowns.delete(enemy.id);
-            console.log(`[DEBUG] Patrolling enemy ${enemy.name} entered combat mode (reduced aggro delay)`);
+            if (DEBUG_LOGGING) console.log(`[DEBUG] Patrolling enemy ${enemy.name} entered combat mode (reduced aggro delay)`);
           }
 
           // Update enemy attack cooldown
@@ -1623,8 +1626,8 @@ export class GameStateManager {
             }
 
             if (!nearestPlayer) {
-              // Debug: log why no player was found (20% of the time)
-              if (Math.random() < 0.20) {
+              // Debug: log why no player was found (only when DEBUG_LOGGING enabled)
+              if (DEBUG_LOGGING && Math.random() < 0.20) {
                 const alivePlayers = state.players.filter(p => p.isAlive);
                 const stealthedPlayers = state.players.filter(p => p.buffs.some(b => b.icon === 'rogue_vanish' || b.icon === 'rogue_stealth'));
                 console.log(`[DEBUG] Enemy ${enemy.name} found no target. Alive: ${alivePlayers.length}, Stealthed: ${stealthedPlayers.length}`);
@@ -1733,7 +1736,7 @@ export class GameStateManager {
                 // If aggro time is not set, set it now (this ensures enemies always have an aggro time)
                 if (!state.tracking.enemyAggroTimes.has(enemy.id)) {
                   state.tracking.enemyAggroTimes.set(enemy.id, Date.now());
-                  console.log(`[DEBUG] Enemy ${enemy.name} (${enemy.id}) aggro time set to NOW`);
+                  if (DEBUG_LOGGING) console.log(`[DEBUG] Enemy ${enemy.name} (${enemy.id}) aggro time set to NOW`);
                 }
                 const aggroTime = state.tracking.enemyAggroTimes.get(enemy.id)!;
                 const timeSinceAggro = (Date.now() - aggroTime) / 1000;
@@ -1742,9 +1745,9 @@ export class GameStateManager {
 
                 if (timeSinceAggro >= requiredDelay) {
                   // Only attack if cooldown is ready, have LOS, and aggro delay has passed
-                  console.log(`[DEBUG] Enemy ${enemy.name} (${enemy.id}) ATTACKING player ${nearestPlayer.name}, timeSinceAggro=${timeSinceAggro.toFixed(2)}s`);
+                  if (DEBUG_LOGGING) console.log(`[DEBUG] Enemy ${enemy.name} (${enemy.id}) ATTACKING player ${nearestPlayer.name}, timeSinceAggro=${timeSinceAggro.toFixed(2)}s`);
                   const result = processEnemyAttack(enemy, nearestPlayer);
-                  if (result.events.length === 0) {
+                  if (DEBUG_LOGGING && result.events.length === 0) {
                     console.log(`[DEBUG] Enemy ${enemy.name} attack produced NO events! Player buffs: ${nearestPlayer.buffs.map(b => b.icon).join(', ')}`);
                   }
                   events.push(...result.events);
@@ -2277,6 +2280,37 @@ export class GameStateManager {
           case GroundEffectType.FirePool:
             // Static, just stays in place
             break;
+
+          case GroundEffectType.TectonicQuadrant:
+            // Tectonic Shift: Telegraph phase then damage phase
+            if (effect.telegraphTime !== undefined && effect.telegraphTime > 0) {
+              effect.telegraphTime -= deltaTime;
+              if (effect.telegraphTime <= 0) {
+                effect.isActive = true; // Now dealing damage
+              }
+            }
+            break;
+
+          case GroundEffectType.VoidGaze:
+            // Void Gaze: Telegraph phase then damage phase, cone slowly rotates
+            if (effect.telegraphTime !== undefined && effect.telegraphTime > 0) {
+              effect.telegraphTime -= deltaTime;
+              if (effect.telegraphTime <= 0) {
+                effect.isActive = true; // Now dealing damage
+              }
+            }
+            // Slowly rotate the gaze direction during active phase
+            if (effect.isActive && effect.coneDirection !== undefined) {
+              effect.coneDirection += 0.8 * deltaTime; // Rotate ~45 degrees per second
+            }
+            break;
+
+          case GroundEffectType.EncroachingDarkness:
+            // Arena shrinks - inner safe radius grows
+            if (effect.innerRadius !== undefined && effect.innerRadius < effect.radius * 0.8) {
+              effect.innerRadius += (effect.radius * 0.3) * deltaTime; // Shrinks over ~3 seconds
+            }
+            break;
         }
 
         // Damage players standing in the effect
@@ -2291,7 +2325,40 @@ export class GameStateManager {
           const dy = player.position.y - effect.position.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
 
-          if (dist <= effect.radius) {
+          // Special handling for new effect types
+          let shouldDamage = false;
+
+          if (effect.type === GroundEffectType.TectonicQuadrant) {
+            // Only damage if in a danger quadrant AND effect is active
+            if (effect.isActive && effect.safeQuadrant !== undefined && dist <= effect.radius) {
+              // Determine which quadrant player is in (0=NE, 1=SE, 2=SW, 3=NW)
+              const playerQuadrant = this.getQuadrant(dx, dy);
+              if (playerQuadrant !== effect.safeQuadrant) {
+                shouldDamage = true;
+              }
+            }
+          } else if (effect.type === GroundEffectType.VoidGaze) {
+            // Only damage if in the cone AND effect is active
+            if (effect.isActive && effect.coneDirection !== undefined && effect.coneAngle !== undefined && dist <= effect.radius) {
+              const angleToPlayer = Math.atan2(dy, dx);
+              const angleDiff = Math.abs(this.normalizeAngle(angleToPlayer - effect.coneDirection));
+              if (angleDiff <= effect.coneAngle / 2) {
+                shouldDamage = true;
+              }
+            }
+          } else if (effect.type === GroundEffectType.EncroachingDarkness) {
+            // Damage if OUTSIDE the safe inner radius
+            if (effect.innerRadius !== undefined && dist > (effect.radius - effect.innerRadius)) {
+              shouldDamage = true;
+            }
+          } else {
+            // Standard circular damage check
+            if (dist <= effect.radius) {
+              shouldDamage = true;
+            }
+          }
+
+          if (shouldDamage) {
             // Check damage tick
             const tickKey = `${effect.id}_${player.id}`;
             const lastTick = state.tracking.groundEffectDamageTicks.get(tickKey) ?? 0;
@@ -3831,6 +3898,26 @@ export class GameStateManager {
   }
 
   /**
+   * Get which quadrant a position is in relative to center (0,0)
+   * 0=NE (x>0, y<0), 1=SE (x>0, y>0), 2=SW (x<0, y>0), 3=NW (x<0, y<0)
+   */
+  private getQuadrant(dx: number, dy: number): number {
+    if (dx >= 0 && dy < 0) return 0;  // NE
+    if (dx >= 0 && dy >= 0) return 1; // SE
+    if (dx < 0 && dy >= 0) return 2;  // SW
+    return 3; // NW
+  }
+
+  /**
+   * Normalize an angle to be between -PI and PI
+   */
+  private normalizeAngle(angle: number): number {
+    while (angle > Math.PI) angle -= 2 * Math.PI;
+    while (angle < -Math.PI) angle += 2 * Math.PI;
+    return angle;
+  }
+
+  /**
    * Create a boss AoE effect based on boss type
    */
   private createBossAoEEffect(state: RunState, boss: Enemy): GroundEffect | null {
@@ -3956,35 +4043,52 @@ export class GameStateManager {
         color: '#8844ff'
       }),
 
-      // Titan - massive expanding slam
-      'boss_titan': () => ({
-        id: effectId,
-        type: GroundEffectType.ExpandingCircle,
-        position: { ...boss.position },
-        sourceId: boss.id,
-        radius: 30,
-        maxRadius: 200,
-        damage: baseDamage * 1.3,
-        tickInterval: 0.4,
-        duration: 3.5,
-        color: '#ffcc00'
-      }),
+      // Titan - Tectonic Shift: 4 quadrants, one safe (green), three danger (red)
+      // Floor 14+ mechanic - requires positional awareness
+      'boss_titan': () => {
+        const safeQuadrant = Math.floor(Math.random() * 4); // 0=NE, 1=SE, 2=SW, 3=NW
+        return {
+          id: effectId,
+          type: GroundEffectType.TectonicQuadrant,
+          position: { ...boss.position },
+          sourceId: boss.id,
+          radius: 250, // Large arena coverage
+          maxRadius: 250,
+          damage: baseDamage * 2.5, // High damage for failing mechanic
+          tickInterval: 0.5,
+          duration: 5, // 2s telegraph + 3s active
+          telegraphTime: 2, // 2 seconds to find safe quadrant
+          safeQuadrant,
+          isActive: false, // Starts in telegraph phase
+          color: '#ffcc00'
+        };
+      },
 
-      // Old God - rotating chaos beam
-      'boss_old_god': () => ({
-        id: effectId,
-        type: GroundEffectType.RotatingBeam,
-        position: { ...boss.position },
-        sourceId: boss.id,
-        radius: 120, // Long beam
-        maxRadius: 120,
-        damage: baseDamage * 1.4,
-        tickInterval: 0.3,
-        duration: 5,
-        direction: { x: 1, y: 0 },
-        speed: 0,
-        color: '#ff00ff'
-      })
+      // Old God - Void Gaze: Cone telegraph that sweeps and deals massive damage
+      // Floor 15 solo mechanic - must dodge the gaze direction
+      'boss_old_god': () => {
+        // Calculate direction toward player for initial gaze
+        const angleToPlayer = Math.atan2(
+          targetPlayer.position.y - boss.position.y,
+          targetPlayer.position.x - boss.position.x
+        );
+        return {
+          id: effectId,
+          type: GroundEffectType.VoidGaze,
+          position: { ...boss.position },
+          sourceId: boss.id,
+          radius: 200, // Long reach
+          maxRadius: 200,
+          damage: baseDamage * 3, // Very high damage - this is the "dodge or die" mechanic
+          tickInterval: 0.2,
+          duration: 4, // 1.5s telegraph + 2.5s active
+          telegraphTime: 1.5, // Time to get out of the cone
+          coneAngle: Math.PI / 3, // 60 degree cone
+          coneDirection: angleToPlayer, // Starts pointing at player
+          isActive: false, // Starts in telegraph phase
+          color: '#ff00ff'
+        };
+      }
     };
 
     // Get the effect creator for this boss
