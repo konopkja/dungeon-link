@@ -689,6 +689,23 @@ export class InventoryUI {
     // Phaser has issues with interactive elements inside containers - hit areas may be offset
     // See BUG_FIXES_2026_02.md section 5 "UI Tooltip System - Common Pitfalls"
 
+    // PERF: Only update if set counts actually changed (this runs every frame!)
+    let setsChanged = setCounts.size !== this.cachedSetCounts.size;
+    if (!setsChanged) {
+      for (const [setId, count] of setCounts) {
+        if (this.cachedSetCounts.get(setId) !== count) {
+          setsChanged = true;
+          break;
+        }
+      }
+    }
+    if (!setsChanged && this.setBonusElements.length > 0) {
+      return; // No change, skip expensive rebuild
+    }
+
+    // Update cache
+    this.cachedSetCounts = new Map(setCounts);
+
     // Clear old dynamic elements (destroy them completely)
     for (const el of this.setBonusElements) {
       el.destroy();
