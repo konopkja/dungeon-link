@@ -204,12 +204,6 @@ export const BOSSES: BossDefinition[] = [
     abilities: ['titan_slam', 'meteor', 'divine_shield'],
     mechanics: [
       {
-        id: 'tectonic_shift',
-        name: 'Tectonic Shift',
-        description: 'Splits arena into 4 quadrants - find the GREEN safe zone or take massive damage!',
-        intervalSeconds: 12
-      },
-      {
         id: 'meteor',
         name: 'Falling Stars',
         description: 'Calls down celestial wrath every 20 seconds',
@@ -239,12 +233,6 @@ export const BOSSES: BossDefinition[] = [
     baseDamage: 45,
     abilities: ['tentacle_slam', 'insanity', 'eye_beam'],
     mechanics: [
-      {
-        id: 'void_gaze',
-        name: 'Void Gaze',
-        description: 'A sweeping cone of annihilation - dodge the eye or be erased! (Solo challenge)',
-        intervalSeconds: 10
-      },
       {
         id: 'tentacles',
         name: 'Embrace of the Deep',

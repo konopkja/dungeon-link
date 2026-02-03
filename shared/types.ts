@@ -449,12 +449,7 @@ export enum GroundEffectType {
   FirePool = 'fire_pool', // Static fire on ground
   MovingWave = 'moving_wave', // Wave moving in one direction
   RotatingBeam = 'rotating_beam', // Beam rotating around boss
-  VoidZone = 'void_zone', // Growing dark zone
-  // Floor 14+ Boss Mechanics
-  TectonicQuadrant = 'tectonic_quadrant', // 4 quadrants - one safe, three danger
-  // Floor 15+ Boss Mechanics
-  VoidGaze = 'void_gaze', // Cone telegraph that deals massive damage
-  EncroachingDarkness = 'encroaching_darkness' // Arena shrinks from edges
+  VoidZone = 'void_zone' // Growing dark zone
 }
 
 export interface GroundEffect {
@@ -470,15 +465,6 @@ export interface GroundEffect {
   direction?: Position; // For moving effects
   speed?: number; // Movement speed
   color: string; // Visual color (hex string)
-  // Tectonic Quadrant specific
-  safeQuadrant?: number; // 0-3: which quadrant is safe (0=NE, 1=SE, 2=SW, 3=NW)
-  telegraphTime?: number; // Seconds of telegraph before damage
-  isActive?: boolean; // Whether damage is currently being dealt
-  // Void Gaze specific
-  coneAngle?: number; // Angle of the cone in radians
-  coneDirection?: number; // Direction the cone is facing (radians from east)
-  // Encroaching Darkness specific
-  innerRadius?: number; // Safe zone inner radius (for ring-shaped effects)
 }
 
 // ============================================
