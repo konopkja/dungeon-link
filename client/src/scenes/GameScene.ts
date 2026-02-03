@@ -34,7 +34,8 @@ export class GameScene extends Phaser.Scene {
 
   // Interpolation targets for smooth movement (masks network jitter)
   private targetPositions: Map<string, { x: number; y: number }> = new Map();
-  private readonly LERP_SPEED = 0.25; // How fast to interpolate (0-1, higher = snappier)
+  private readonly LERP_SPEED_PLAYER = 0.4; // Player lerp (slightly smoothed for feel)
+  private readonly LERP_SPEED_ENEMY = 0.6; // Enemy lerp (snappier to avoid speed wobble)
 
   // UI
   private floorText: Phaser.GameObjects.Text | null = null;
@@ -3444,8 +3445,8 @@ export class GameScene extends Phaser.Scene {
         const target = this.targetPositions.get(enemy.id)!;
         const currentX = sprite.x;
         const currentY = sprite.y;
-        const newX = currentX + (target.x - currentX) * this.LERP_SPEED;
-        const newY = currentY + (target.y - currentY) * this.LERP_SPEED;
+        const newX = currentX + (target.x - currentX) * this.LERP_SPEED_ENEMY;
+        const newY = currentY + (target.y - currentY) * this.LERP_SPEED_ENEMY;
         sprite.setPosition(newX, newY);
 
         // Update health bar at interpolated position - position higher for bosses to clear their larger sprite
@@ -3885,8 +3886,8 @@ export class GameScene extends Phaser.Scene {
       const target = this.targetPositions.get(player.id)!;
       const currentX = sprite.x;
       const currentY = sprite.y;
-      const newX = currentX + (target.x - currentX) * this.LERP_SPEED;
-      const newY = currentY + (target.y - currentY) * this.LERP_SPEED;
+      const newX = currentX + (target.x - currentX) * this.LERP_SPEED_PLAYER;
+      const newY = currentY + (target.y - currentY) * this.LERP_SPEED_PLAYER;
       sprite.setPosition(newX, newY);
 
       // Highlight current player
