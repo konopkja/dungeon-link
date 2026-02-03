@@ -34,6 +34,17 @@ export class GameScene extends Phaser.Scene {
   private targetPositions: Map<string, { x: number; y: number }> = new Map();
   private readonly LERP_SPEED = 0.25; // 25% per frame at 60fps = ~smooth catch-up
 
+  // Reusable Sets for render functions (avoid allocating new Sets every frame)
+  private readonly _activeRoomIds = new Set<string>();
+  private readonly _activeEnemyIds = new Set<string>();
+  private readonly _activeItemIds = new Set<string>();
+  private readonly _activeTrapIds = new Set<string>();
+  private readonly _activeChestIds = new Set<string>();
+  private readonly _activePlayerIds = new Set<string>();
+  private readonly _activePetIds = new Set<string>();
+  private readonly _activeVendorIds = new Set<string>();
+  private readonly _activeEffectIds = new Set<string>();
+
   // UI
   private floorText: Phaser.GameObjects.Text | null = null;
   private levelText: Phaser.GameObjects.Text | null = null;
@@ -94,6 +105,7 @@ export class GameScene extends Phaser.Scene {
 
   // Ground effects
   private groundEffectGraphics: Map<string, Phaser.GameObjects.Container> = new Map();
+  private groundEffectColors: Map<string, number> = new Map(); // Cache parsed colors to avoid string ops every frame
 
   // Active notifications for stacking
   private activeNotifications: Phaser.GameObjects.Text[] = [];
@@ -1876,7 +1888,8 @@ export class GameScene extends Phaser.Scene {
     if (!this.roomGraphics) return;
 
     this.roomGraphics.clear();
-    const activeRoomIds = new Set<string>();
+    const activeRoomIds = this._activeRoomIds;
+    activeRoomIds.clear();
     const decoScale = 0.15; // Scale for decorations
     const currentTheme = theme || FloorTheme.Crypt;
 
@@ -3299,7 +3312,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderEnemies(rooms: Room[]): void {
-    const activeEnemyIds = new Set<string>();
+    const activeEnemyIds = this._activeEnemyIds;
+    activeEnemyIds.clear();
 
     for (const room of rooms) {
       for (const enemy of room.enemies) {
@@ -3548,7 +3562,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderGroundItems(rooms: Room[]): void {
-    const activeItemIds = new Set<string>();
+    const activeItemIds = this._activeItemIds;
+    activeItemIds.clear();
 
     for (const room of rooms) {
       if (!room.groundItems) continue;
@@ -3675,7 +3690,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderTraps(rooms: Room[]): void {
-    const activeTrapIds = new Set<string>();
+    const activeTrapIds = this._activeTrapIds;
+    activeTrapIds.clear();
 
     for (const room of rooms) {
       if (!room.traps) continue;
@@ -3735,7 +3751,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderChests(rooms: Room[]): void {
-    const activeChestIds = new Set<string>();
+    const activeChestIds = this._activeChestIds;
+    activeChestIds.clear();
 
     for (const room of rooms) {
       if (!room.chests) continue;
@@ -3822,7 +3839,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderPlayers(players: Player[]): void {
-    const activePlayerIds = new Set<string>();
+    const activePlayerIds = this._activePlayerIds;
+    activePlayerIds.clear();
 
     for (const player of players) {
       activePlayerIds.add(player.id);
@@ -4233,7 +4251,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderPets(pets: Pet[]): void {
-    const activePetIds = new Set<string>();
+    const activePetIds = this._activePetIds;
+    activePetIds.clear();
     const currentPlayerId = wsClient.playerId;
 
     for (const pet of pets) {
@@ -4301,7 +4320,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderVendors(rooms: Room[]): void {
-    const activeVendorIds = new Set<string>();
+    const activeVendorIds = this._activeVendorIds;
+    activeVendorIds.clear();
 
     for (const room of rooms) {
       // Collect all vendors in this room (trainer, shop, and crypto)
@@ -4474,7 +4494,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderGroundEffects(effects: GroundEffect[]): void {
-    const activeEffectIds = new Set<string>();
+    const activeEffectIds = this._activeEffectIds;
+    activeEffectIds.clear();
 
     for (const effect of effects) {
       activeEffectIds.add(effect.id);
@@ -4507,6 +4528,7 @@ export class GameScene extends Phaser.Scene {
           }
         });
         this.groundEffectGraphics.delete(id);
+        this.groundEffectColors.delete(id);
       }
     }
   }
@@ -4514,8 +4536,9 @@ export class GameScene extends Phaser.Scene {
   private createGroundEffectVisual(effect: GroundEffect): Phaser.GameObjects.Container {
     const container = this.add.container(effect.position.x, effect.position.y).setDepth(4);
 
-    // Parse color from hex string
+    // Parse and cache color (avoid string ops every frame in update)
     const color = parseInt(effect.color.replace('#', ''), 16);
+    this.groundEffectColors.set(effect.id, color);
 
     // Create base circle/graphic based on type
     switch (effect.type) {
@@ -4621,7 +4644,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateGroundEffectVisual(container: Phaser.GameObjects.Container, effect: GroundEffect): void {
-    const color = parseInt(effect.color.replace('#', ''), 16);
+    // Use cached color to avoid string parsing every frame
+    const color = this.groundEffectColors.get(effect.id) ?? 0xff0000;
 
     switch (effect.type) {
       case GroundEffectType.ExpandingCircle:
