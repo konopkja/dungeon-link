@@ -1433,3 +1433,264 @@ Added debug logs to trace state issues:
 | Wait for RUN_CREATED before render | GameScene.create() conditional |
 
 ---
+
+## 13. Room Rendering Bug When Switching Characters
+
+### Problem
+When a player saved their game, clicked "Leave", and started a new game with a different character, the floor plan could become bugged. The player would be standing on a pathway (corridor) but no room would be rendered, even though the minimap showed the room correctly.
+
+**Root Cause:**
+The `shutdown()` method in GameScene didn't clear room-related caches (`roomTiles`, `roomDecorations`, `roomWalls`, etc.). It relied on `create()` to do the cleanup, but timing issues between scene stop/start could cause stale room data to persist.
+
+### Solution
+Added explicit cleanup of all room rendering caches in `shutdown()`, plus additional validation in `renderWorld()` to ensure dungeon data is valid and `currentRoomId` exists.
+
+**Files Changed:**
+- `client/src/scenes/GameScene.ts`
+
+**Key Code (shutdown cleanup):**
+```typescript
+shutdown(): void {
+  // ... existing cleanup ...
+
+  // CRITICAL: Clear room caches to prevent stale dungeon rendering on scene restart
+  this.roomTiles.clear();
+  this.roomDecorations.clear();
+  this.roomWalls.clear();
+  this.roomModifierOverlays.clear();
+  this.corridorElements.clear();
+  this._activeRoomIds.clear();
+
+  // ... rest of shutdown ...
+}
+```
+
+**Key Code (renderWorld validation):**
+```typescript
+private renderWorld(): void {
+  const state = wsClient.currentState;
+  if (!state) return;
+
+  // CRITICAL: Validate dungeon data is properly initialized
+  if (!state.dungeon || !state.dungeon.rooms || state.dungeon.rooms.length === 0) {
+    console.warn('[DEBUG] renderWorld skipped - dungeon data not initialized');
+    return;
+  }
+
+  // Validate currentRoomId exists in the rooms array
+  const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+  if (!currentRoom) {
+    console.error('[DEBUG] renderWorld - currentRoomId not found in rooms:', state.dungeon.currentRoomId);
+    // Try to recover by using the start room
+    const startRoom = state.dungeon.rooms.find(r => r.type === 'start');
+    if (startRoom) {
+      state.dungeon.currentRoomId = startRoom.id;
+    }
+  }
+
+  // ... rest of render logic
+}
+```
+
+### Why This Works
+| Protection | Purpose |
+|------------|---------|
+| Clear caches in shutdown() | No stale TileSprites/decorations persist between games |
+| Validate dungeon exists | Prevent rendering with null/empty dungeon |
+| Validate currentRoomId | Recover from corrupted room state |
+| Fallback to start room | Graceful recovery if currentRoomId is invalid |
+
+---
+
+## 14. Boss Burst Damage on High Floors
+
+### Problem
+On floor 10+, bosses would instantly cast 3+ spells the moment they aggroed, nuking caster classes immediately. All boss abilities started with 0 cooldown, leading to simultaneous burst.
+
+### Solution
+Stagger initial boss ability cooldowns so abilities come online gradually (4s, 7s, 10s, 13s...), giving players time to react.
+
+**Files Changed:**
+- `server/src/game/GameState.ts`
+
+**Key Code:**
+```typescript
+// When boss aggros, stagger initial cooldowns
+for (let i = 0; i < bossAbilities.length; i++) {
+  const abilityId = bossAbilities[i];
+  const cdKey = `${enemy.id}_${abilityId}`;
+  const baseDelay = 4 + i * 3; // 4s, 7s, 10s, 13s...
+  const initialCooldown = baseDelay + Math.random();
+  state.tracking.bossAbilityCooldowns.set(cdKey, initialCooldown);
+}
+```
+
+**Ability Timeline:**
+| Ability # | Available At |
+|-----------|--------------|
+| 1st | ~4 seconds |
+| 2nd | ~7 seconds |
+| 3rd | ~10 seconds |
+| 4th | ~13 seconds |
+| 5th | ~16 seconds |
+
+Also added boss cooldown clearing when advancing floors to reset state for the next boss.
+
+---
+
+## 15. RotatingBeam Damages Entire Radius
+
+### Problem
+The floor 7 boss (Old God) creates a rotating beam effect that visually looks like a clock hand sweeping in a circle. However, the damage was being applied to the entire radius, not just where the beam was pointing. This was misleading - players thought they were safe if they weren't in the beam's path.
+
+### Solution
+Changed RotatingBeam damage calculation to only hit players within a 20-degree cone in the beam's direction.
+
+**Files Changed:**
+- `server/src/game/GameState.ts`
+
+**Key Code:**
+```typescript
+// Special handling for RotatingBeam - only damage players in the beam's path
+let isInEffect = false;
+if (effect.type === GroundEffectType.RotatingBeam && effect.direction) {
+  // Player must be within the beam length AND within a 20-degree cone
+  if (dist <= effect.radius && dist > 20) { // Min distance to avoid always hitting at center
+    const playerAngle = Math.atan2(dy, dx);
+    const beamAngle = Math.atan2(effect.direction.y, effect.direction.x);
+    let angleDiff = Math.abs(playerAngle - beamAngle);
+    // Normalize angle difference to [0, PI]
+    if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+    // 20 degrees = ~0.35 radians - narrow beam
+    const beamHalfWidth = 0.35;
+    isInEffect = angleDiff <= beamHalfWidth;
+  }
+} else {
+  // All other effects use circular radius check
+  isInEffect = dist <= effect.radius;
+}
+```
+
+**Behavior:**
+| Position | Takes Damage? |
+|----------|---------------|
+| In beam's path (20° cone) | Yes |
+| Same radius but different angle | No |
+| Center of effect (< 20px) | No (safe spot) |
+
+---
+
+## 16. GravityWell Mechanic for Floor 6 Void Lord
+
+### Problem
+The floor 5-6 boss (Void Lord - Nethris the Hollow) had a basic VoidZone effect that was similar to other bosses. User requested a "more fun mechanic" to make the fight more interactive.
+
+### Solution
+Created a new GravityWell ground effect type that pulls players toward its center. Players must actively move against the pull to avoid being sucked in.
+
+**Files Changed:**
+- `shared/types.ts` - Added `GroundEffectType.GravityWell`
+- `server/src/game/GameState.ts` - Implemented pull mechanic + effect behavior
+- `server/src/data/bosses.ts` - Updated Void Lord mechanics description
+- `client/src/scenes/GameScene.ts` - Added visual rendering (swirling vortex)
+
+**Key Code (Pull Mechanic):**
+```typescript
+// GravityWell pulls players toward center
+if (effect.type === GroundEffectType.GravityWell && dist <= effect.radius && dist > 10) {
+  // Pull strength increases as you get closer to center (more dramatic effect)
+  const pullStrength = 80 + (1 - dist / effect.radius) * 40; // 80-120 units/sec
+  const pullX = (-dx / dist) * pullStrength * deltaTime;
+  const pullY = (-dy / dist) * pullStrength * deltaTime;
+  player.position.x += pullX;
+  player.position.y += pullY;
+}
+```
+
+**Effect Properties:**
+| Property | Value |
+|----------|-------|
+| Pull Strength | 80-120 units/sec (stronger near center) |
+| Radius | 140px (large area) |
+| Duration | 5 seconds |
+| Damage | Lower than VoidZone (pull is the danger) |
+| Visual | Purple swirling vortex with rotating spiral arms |
+
+**Strategy:** Stay at the edges and actively move away from the center!
+
+---
+
+## 17. Player Frame Shows Wrong Class Face Icon
+
+### Problem
+When switching between characters (e.g., playing Warrior, leaving, then starting new game as Mage), the player frame in the top-left would show the wrong class face icon (Warrior instead of Mage), even though the in-game sprite was correct.
+
+**Root Cause:**
+The `updatePlayerFrame()` function only created the face icon once and never updated it. The check was:
+```typescript
+if (!existingFaceIcon && this.textures.exists(faceTextureKey)) {
+  // Create icon - but never update if class changes
+}
+```
+
+If stale state caused the wrong class to be rendered first, the icon would never be corrected.
+
+### Solution
+Added logic to check if the existing face icon has the wrong texture and update it to match the current player's class.
+
+**Files Changed:**
+- `client/src/scenes/GameScene.ts`
+
+**Key Code:**
+```typescript
+if (this.textures.exists(faceTextureKey)) {
+  if (iconPlaceholder) {
+    iconPlaceholder.setVisible(false);
+  }
+
+  if (existingFaceIcon) {
+    // BUGFIX: Update existing icon if it's showing wrong class texture
+    if (existingFaceIcon.texture.key !== faceTextureKey) {
+      existingFaceIcon.setTexture(faceTextureKey);
+    }
+  } else {
+    // Add the face image for the first time
+    const faceIcon = this.add.image(iconX + iconSize / 2, iconY + iconSize / 2, faceTextureKey);
+    faceIcon.setDisplaySize(iconSize - 4, iconSize - 4);
+    faceIcon.setName('playerFrameFaceIcon');
+    this.playerFrame.add(faceIcon);
+  }
+}
+```
+
+**Behavior:**
+| Scenario | Before Fix | After Fix |
+|----------|------------|-----------|
+| New game, same class | Correct | Correct |
+| New game, different class | Wrong (old class) | Correct (updates texture) |
+| Load saved character | Wrong (old class) | Correct |
+
+---
+
+## 18. Arcane Barrier Tooltip Missing Shield Amount
+
+### Problem
+The Arcane Barrier set bonus (Archmage 4pc) description didn't specify how much shield it provided, making it hard for players to evaluate the bonus.
+
+### Solution
+Updated the description to include specific values.
+
+**Files Changed:**
+- `server/src/data/sets.ts`
+
+**Before:**
+```
+Arcane Barrier: Spell crits generate shield
+```
+
+**After:**
+```
+Arcane Barrier: Spell crits generate 15% shield (max 50% HP, 8s)
+```
+
+---
