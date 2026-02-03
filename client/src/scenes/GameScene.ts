@@ -32,6 +32,10 @@ export class GameScene extends Phaser.Scene {
   private corridorElements: Map<string, Phaser.GameObjects.GameObject[]> = new Map();
   private healthBars: Map<string, { bg: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle }> = new Map();
 
+  // Interpolation targets for smooth movement (masks network jitter)
+  private targetPositions: Map<string, { x: number; y: number }> = new Map();
+  private readonly LERP_SPEED = 0.25; // How fast to interpolate (0-1, higher = snappier)
+
   // UI
   private floorText: Phaser.GameObjects.Text | null = null;
   private levelText: Phaser.GameObjects.Text | null = null;
@@ -3435,12 +3439,18 @@ export class GameScene extends Phaser.Scene {
           }
         }
 
-        // Update position
-        sprite.setPosition(enemy.position.x, enemy.position.y);
+        // Update position with interpolation (smooths network jitter)
+        this.targetPositions.set(enemy.id, { x: enemy.position.x, y: enemy.position.y });
+        const target = this.targetPositions.get(enemy.id)!;
+        const currentX = sprite.x;
+        const currentY = sprite.y;
+        const newX = currentX + (target.x - currentX) * this.LERP_SPEED;
+        const newY = currentY + (target.y - currentY) * this.LERP_SPEED;
+        sprite.setPosition(newX, newY);
 
-        // Update health bar - position higher for bosses to clear their larger sprite
+        // Update health bar at interpolated position - position higher for bosses to clear their larger sprite
         const healthBarYOffset = enemy.isBoss ? -60 : -25;
-        this.updateHealthBar(enemy.id, enemy.position.x, enemy.position.y + healthBarYOffset, enemy.stats.health, enemy.stats.maxHealth, enemy.isBoss ? 60 : 40);
+        this.updateHealthBar(enemy.id, newX, newY + healthBarYOffset, enemy.stats.health, enemy.stats.maxHealth, enemy.isBoss ? 60 : 40);
 
         // Check for stun debuffs (Blind or Judgment) and apply visual effect
         const stunDebuff = enemy.debuffs?.find(d =>
@@ -3516,6 +3526,7 @@ export class GameScene extends Phaser.Scene {
       if (!activeEnemyIds.has(id)) {
         sprite.destroy();
         this.enemySprites.delete(id);
+        this.targetPositions.delete(id); // Cleanup interpolation target
         this.removeHealthBar(id);
         // Also cleanup blind effects
         const blindGfx = this.enemyDebuffEffects.get(id);
@@ -3869,8 +3880,14 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Update position
-      sprite.setPosition(player.position.x, player.position.y);
+      // Update position with interpolation (smooths network jitter)
+      this.targetPositions.set(player.id, { x: player.position.x, y: player.position.y });
+      const target = this.targetPositions.get(player.id)!;
+      const currentX = sprite.x;
+      const currentY = sprite.y;
+      const newX = currentX + (target.x - currentX) * this.LERP_SPEED;
+      const newY = currentY + (target.y - currentY) * this.LERP_SPEED;
+      sprite.setPosition(newX, newY);
 
       // Highlight current player
       const isCurrentPlayer = player.id === wsClient.playerId;
@@ -3878,8 +3895,8 @@ export class GameScene extends Phaser.Scene {
         sprite.setTint(0xffffff);
       }
 
-      // Update health bar (with padding above character)
-      this.updateHealthBar(player.id, player.position.x, player.position.y - 35, player.stats.health, player.stats.maxHealth, 40);
+      // Update health bar at interpolated position
+      this.updateHealthBar(player.id, newX, newY - 35, player.stats.health, player.stats.maxHealth, 40);
 
       // Render protection visual effect for buffs
       this.renderProtectionEffect(player);
@@ -3890,6 +3907,7 @@ export class GameScene extends Phaser.Scene {
       if (!activePlayerIds.has(id)) {
         sprite.destroy();
         this.playerSprites.delete(id);
+        this.targetPositions.delete(id); // Cleanup interpolation target
         this.removeHealthBar(id);
         // Clean up protection effect
         const protectionGraphics = this.protectionEffects.get(id);
