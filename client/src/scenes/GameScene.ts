@@ -29,6 +29,11 @@ export class GameScene extends Phaser.Scene {
   private corridorElements: Map<string, Phaser.GameObjects.GameObject[]> = new Map();
   private healthBars: Map<string, { bg: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle }> = new Map();
 
+  // Position interpolation for smooth movement over network
+  // Stores target positions from server; sprites lerp toward these each frame
+  private targetPositions: Map<string, { x: number; y: number }> = new Map();
+  private readonly LERP_SPEED = 0.25; // 25% per frame at 60fps = ~smooth catch-up
+
   // UI
   private floorText: Phaser.GameObjects.Text | null = null;
   private levelText: Phaser.GameObjects.Text | null = null;
@@ -3451,12 +3456,23 @@ export class GameScene extends Phaser.Scene {
           }
         }
 
-        // Update position
-        sprite.setPosition(enemy.position.x, enemy.position.y);
+        // Update position with interpolation for smooth movement
+        const targetKey = `enemy_${enemy.id}`;
+        this.targetPositions.set(targetKey, { x: enemy.position.x, y: enemy.position.y });
 
-        // Update health bar - position higher for bosses to clear their larger sprite
+        const target = this.targetPositions.get(targetKey)!;
+        const currentX = sprite.x;
+        const currentY = sprite.y;
+
+        // Lerp toward target position (slightly faster for enemies to feel responsive)
+        const enemyLerp = this.LERP_SPEED * 1.2;
+        const newX = currentX + (target.x - currentX) * enemyLerp;
+        const newY = currentY + (target.y - currentY) * enemyLerp;
+        sprite.setPosition(newX, newY);
+
+        // Update health bar using interpolated position
         const healthBarYOffset = enemy.isBoss ? -60 : -25;
-        this.updateHealthBar(enemy.id, enemy.position.x, enemy.position.y + healthBarYOffset, enemy.stats.health, enemy.stats.maxHealth, enemy.isBoss ? 60 : 40);
+        this.updateHealthBar(enemy.id, sprite.x, sprite.y + healthBarYOffset, enemy.stats.health, enemy.stats.maxHealth, enemy.isBoss ? 60 : 40);
 
         // Check for stun debuffs (Blind or Judgment) and apply visual effect
         const stunDebuff = enemy.debuffs?.find(d =>
@@ -3475,11 +3491,11 @@ export class GameScene extends Phaser.Scene {
             this.enemyDebuffEffects.set(enemy.id, stunGfx);
           }
 
-          // Draw swirling stars effect above enemy
+          // Draw swirling stars effect above enemy (use interpolated sprite position)
           stunGfx.clear();
           const time = this.time.now / 1000;
-          const centerX = enemy.position.x;
-          const centerY = enemy.position.y - (enemy.isBoss ? 70 : 35);
+          const centerX = sprite.x;
+          const centerY = sprite.y - (enemy.isBoss ? 70 : 35);
 
           // Different colors for Judgment (holy golden) vs Blind (yellow)
           const starColor = isJudgment ? 0xffd700 : 0xffff00;
@@ -3885,8 +3901,18 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Update position
-      sprite.setPosition(player.position.x, player.position.y);
+      // Update position with interpolation for smooth movement
+      const targetKey = `player_${player.id}`;
+      this.targetPositions.set(targetKey, { x: player.position.x, y: player.position.y });
+
+      const target = this.targetPositions.get(targetKey)!;
+      const currentX = sprite.x;
+      const currentY = sprite.y;
+
+      // Lerp toward target position
+      const newX = currentX + (target.x - currentX) * this.LERP_SPEED;
+      const newY = currentY + (target.y - currentY) * this.LERP_SPEED;
+      sprite.setPosition(newX, newY);
 
       // Highlight current player
       const isCurrentPlayer = player.id === wsClient.playerId;
@@ -3894,8 +3920,8 @@ export class GameScene extends Phaser.Scene {
         sprite.setTint(0xffffff);
       }
 
-      // Update health bar (with padding above character)
-      this.updateHealthBar(player.id, player.position.x, player.position.y - 35, player.stats.health, player.stats.maxHealth, 40);
+      // Update health bar using interpolated position (sprite.x/y, not server position)
+      this.updateHealthBar(player.id, sprite.x, sprite.y - 35, player.stats.health, player.stats.maxHealth, 40);
 
       // Render protection visual effect for buffs
       this.renderProtectionEffect(player);
@@ -4263,11 +4289,17 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Update position
-      sprite.setPosition(pet.position.x, pet.position.y);
+      // Update position with interpolation
+      const targetKey = `pet_${pet.id}`;
+      this.targetPositions.set(targetKey, { x: pet.position.x, y: pet.position.y });
 
-      // Update health bar
-      this.updateHealthBar(pet.id, pet.position.x, pet.position.y - 20, pet.stats.health, pet.stats.maxHealth, 30);
+      const target = this.targetPositions.get(targetKey)!;
+      const newX = sprite.x + (target.x - sprite.x) * this.LERP_SPEED;
+      const newY = sprite.y + (target.y - sprite.y) * this.LERP_SPEED;
+      sprite.setPosition(newX, newY);
+
+      // Update health bar using interpolated position
+      this.updateHealthBar(pet.id, sprite.x, sprite.y - 20, pet.stats.health, pet.stats.maxHealth, 30);
     }
 
     // Remove sprites for pets that no longer exist
