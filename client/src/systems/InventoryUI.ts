@@ -276,7 +276,7 @@ export class InventoryUI {
 
     // Bonus text - 14px (interactive for collapsible sets)
     this.setBonusText = this.addElement(this.scene.add.text(bonusX + 12, topY + 45, '', {
-      fontFamily: FONTS.body, fontSize: '14px', color: '#88cc88', lineSpacing: 4,
+      fontFamily: FONTS.body, fontSize: '14px', color: '#ffffff', lineSpacing: 4,
       wordWrap: { width: bonusW - 24 },
       stroke: '#000000', strokeThickness: 1
     }));
@@ -690,7 +690,8 @@ export class InventoryUI {
           const isExpanded = this.expandedSets.has(setId);
           const arrow = isExpanded ? '▼' : '▶';
           const activeBonusCount = SET_BONUSES[setId]?.filter(b => count >= b.pieces).length ?? 0;
-          bonusLines.push(`${arrow} ${SET_NAMES[setId] ?? setId}`);
+          // Set name in uppercase for emphasis (bold not available in bitmap text)
+          bonusLines.push(`${arrow} ${(SET_NAMES[setId] ?? setId).toUpperCase()}`);
           bonusLines.push(`   (${count}/5) [${activeBonusCount} active]`);
 
           // Only show bonus details if expanded
@@ -704,7 +705,6 @@ export class InventoryUI {
           }
           bonusLines.push('');
         }
-        bonusLines.push('Click set name to expand');
       } else {
         bonusLines.push('No set bonuses');
         bonusLines.push('');
