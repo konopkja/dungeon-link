@@ -10,6 +10,9 @@ const MAX_SAVE_SLOTS = 5;
 type MessageHandler = (message: ServerMessage) => void;
 type ConnectionHandler = () => void;
 
+// Set to true to enable verbose debug logging (CAUSES LAG - only for debugging)
+const DEBUG_LOGGING = false;
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
@@ -151,10 +154,10 @@ export class WebSocketClient {
    * Send a message to the server
    */
   send(message: ClientMessage): void {
-    console.log('[DEBUG] Sending message:', message.type, 'ws state:', this.ws?.readyState);
+    if (DEBUG_LOGGING) console.log('[DEBUG] Sending message:', message.type, 'ws state:', this.ws?.readyState);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
-      console.log('[DEBUG] Message sent successfully');
+      if (DEBUG_LOGGING) console.log('[DEBUG] Message sent successfully');
     } else {
       console.error('[DEBUG] Failed to send - ws not open. readyState:', this.ws?.readyState);
     }
@@ -250,10 +253,10 @@ export class WebSocketClient {
    */
   onMessage(handler: MessageHandler): () => void {
     this.messageHandlers.add(handler);
-    console.log('[WS] Message handler added, total handlers:', this.messageHandlers.size);
+    if (DEBUG_LOGGING) console.log('[WS] Message handler added, total handlers:', this.messageHandlers.size);
     return () => {
       this.messageHandlers.delete(handler);
-      console.log('[WS] Message handler removed, total handlers:', this.messageHandlers.size);
+      if (DEBUG_LOGGING) console.log('[WS] Message handler removed, total handlers:', this.messageHandlers.size);
     };
   }
 

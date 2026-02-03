@@ -138,7 +138,7 @@ export function RewardPoolDisplay() {
     const poolValue = parseFloat(poolBalanceEth || '0');
     const isImpressive = !isNaN(poolValue) && poolValue >= IMPRESSIVE_POOL_THRESHOLD;
 
-    console.log('[Vault] Pool balance:', poolBalanceEth, 'ETH, impressive:', isImpressive);
+    // console.log('[Vault] Pool balance:', poolBalanceEth, 'ETH, impressive:', isImpressive);
 
     const statusBadge = document.querySelector('.vault-status-badge');
 

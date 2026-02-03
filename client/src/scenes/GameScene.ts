@@ -9,6 +9,9 @@ import { InventoryUI } from '../systems/InventoryUI';
 import { saveLeaderboardEntry, addActivity } from '../main';
 import { FONTS, COLORS, COLORS_HEX, PANEL, BUTTON, drawCornerDecorations, createTooltipBg, createCloseButton } from '../ui/theme';
 
+// Set to true to enable verbose debug logging (CAUSES LAG - only for debugging)
+const DEBUG_LOGGING = false;
+
 export class GameScene extends Phaser.Scene {
   private inputManager: InputManager | null = null;
   private abilitySystem: AbilitySystem | null = null;
@@ -1510,7 +1513,7 @@ export class GameScene extends Phaser.Scene {
   update(time: number, delta: number): void {
     // Log every 300 frames (about every 5 seconds at 60fps)
     this.updateFrameCount++;
-    if (this.updateFrameCount % 300 === 0) {
+    if (DEBUG_LOGGING && this.updateFrameCount % 300 === 0) {
       console.log('[DEBUG] GameScene update() frame', this.updateFrameCount, 'active scenes:', this.scene.manager.getScenes(true).map(s => s.scene.key));
     }
 
@@ -1548,7 +1551,7 @@ export class GameScene extends Phaser.Scene {
 
     // CRITICAL: Validate state belongs to current run to prevent rendering stale floor data
     if (wsClient.runId && state.runId !== wsClient.runId) {
-      console.warn('[DEBUG] renderWorld skipped - stale state detected:', state.runId, 'vs', wsClient.runId);
+      if (DEBUG_LOGGING) console.warn('[DEBUG] renderWorld skipped - stale state detected:', state.runId, 'vs', wsClient.runId);
       return;
     }
 
@@ -2873,11 +2876,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private playEnemyRangedAttackAnimation(enemyId: string, enemyName: string, enemyType: string, position: { x: number; y: number }): void {
-    console.log(`[ANIM] Enemy attack: ${enemyName} (${enemyType}) at (${position.x}, ${position.y})`);
+    if (DEBUG_LOGGING) console.log(`[ANIM] Enemy attack: ${enemyName} (${enemyType}) at (${position.x}, ${position.y})`);
 
     const sprite = this.enemySprites.get(enemyId);
     if (!sprite) {
-      console.log(`[ANIM] No sprite found for ${enemyId}`);
+      if (DEBUG_LOGGING) console.log(`[ANIM] No sprite found for ${enemyId}`);
       return;
     }
 
@@ -2903,12 +2906,12 @@ export class GameScene extends Phaser.Scene {
     // ARCHER (physical ranged) attack - bow and arrow effect
     // Only for actual archer-type enemies, NOT spectral/magic creatures
     if (isArcher || (enemyType === 'ranged' && !isSpectral && !isVoid && !isDarkMagic)) {
-      console.log(`[ANIM] Playing ARCHER animation for ${enemyName}`);
+      if (DEBUG_LOGGING) console.log(`[ANIM] Playing ARCHER animation for ${enemyName}`);
       this.playArcherAttackAnimation(position);
       return;
     }
 
-    console.log(`[ANIM] Playing MAGIC animation for ${enemyName}: spectral=${isSpectral}, void=${isVoid}, dark=${isDarkMagic}`);
+    if (DEBUG_LOGGING) console.log(`[ANIM] Playing MAGIC animation for ${enemyName}: spectral=${isSpectral}, void=${isVoid}, dark=${isDarkMagic}`);
 
     // MAGIC attack - determine effect colors based on enemy name
     let primaryColor = 0x8844ff;
@@ -3622,7 +3625,7 @@ export class GameScene extends Phaser.Scene {
           const containerRef = container;
           containerRef.on('pointerdown', () => {
             const itemId = containerRef.getData('itemId') as string;
-            console.log('[DEBUG] Ground item clicked:', itemId);
+            if (DEBUG_LOGGING) console.log('[DEBUG] Ground item clicked:', itemId);
             wsClient.pickupGroundItem(itemId);
           });
 
@@ -3766,7 +3769,7 @@ export class GameScene extends Phaser.Scene {
                 }
               }
               // Request to open chest from server
-              console.log('[DEBUG] Sending OPEN_CHEST for:', chestId);
+              if (DEBUG_LOGGING) console.log('[DEBUG] Sending OPEN_CHEST for:', chestId);
               wsClient.send({ type: 'OPEN_CHEST', chestId });
             }
           });
@@ -5999,7 +6002,7 @@ export class GameScene extends Phaser.Scene {
         });
       }
     } else if (message.type === 'VENDOR_SERVICES') {
-      console.log('[DEBUG] VENDOR_SERVICES received:', message.vendorId, 'services:', message.services);
+      if (DEBUG_LOGGING) console.log('[DEBUG] VENDOR_SERVICES received:', message.vendorId, 'services:', message.services);
       this.currentVendorId = message.vendorId;
       this.vendorServices = message.services;
       const player = wsClient.getCurrentPlayer();
@@ -6012,10 +6015,10 @@ export class GameScene extends Phaser.Scene {
         this.showVendorUI();
       }
     } else if (message.type === 'CRYPTO_VENDOR_SERVICES') {
-      console.log('[DEBUG] CRYPTO_VENDOR_SERVICES received, purchases remaining:', message.purchasesRemaining);
+      if (DEBUG_LOGGING) console.log('[DEBUG] CRYPTO_VENDOR_SERVICES received, purchases remaining:', message.purchasesRemaining);
       openCryptoVendor(message.purchasesRemaining);
     } else if (message.type === 'CRYPTO_PURCHASE_VERIFIED') {
-      console.log('[DEBUG] CRYPTO_PURCHASE_VERIFIED received:', message.potion);
+      if (DEBUG_LOGGING) console.log('[DEBUG] CRYPTO_PURCHASE_VERIFIED received:', message.potion);
       const qualityColor = message.potion.quality === 'superior' ? 0xffaa00 :
                           message.potion.quality === 'greater' ? 0x9966ff :
                           message.potion.quality === 'standard' ? 0x44ff44 : 0xaaaaaa;
@@ -6023,7 +6026,7 @@ export class GameScene extends Phaser.Scene {
       this.showNotification(`Received: ${qualityLabel} ${message.potion.name}!`, qualityColor);
       updatePurchasesRemaining(message.purchasesRemaining);
     } else if (message.type === 'CRYPTO_PURCHASE_FAILED') {
-      console.log('[DEBUG] CRYPTO_PURCHASE_FAILED:', message.reason);
+      if (DEBUG_LOGGING) console.log('[DEBUG] CRYPTO_PURCHASE_FAILED:', message.reason);
       this.showNotification(`Purchase failed: ${message.reason}`, 0xff4444);
     } else if (message.type === 'CHEST_ETH_DROP') {
       console.log('[DEBUG] CHEST_ETH_DROP received:', message);
@@ -7679,7 +7682,7 @@ export class GameScene extends Phaser.Scene {
       }
       this.lastMusicChangeTime = now;
 
-      console.log(`[DEBUG] Music changing from ${this.currentMusicKey} to ${targetMusicKey}`);
+      if (DEBUG_LOGGING) console.log(`[DEBUG] Music changing from ${this.currentMusicKey} to ${targetMusicKey}`);
 
       // Stop current music
       if (this.currentMusic) {
@@ -7703,7 +7706,7 @@ export class GameScene extends Phaser.Scene {
     try {
       // Check if music exists in cache
       if (!this.cache.audio.exists(musicKey)) {
-        console.log(`[DEBUG] Music ${musicKey} not loaded yet`);
+        if (DEBUG_LOGGING) console.log(`[DEBUG] Music ${musicKey} not loaded yet`);
         return;
       }
 
