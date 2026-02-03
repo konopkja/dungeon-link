@@ -1512,9 +1512,31 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateFrameCount = 0;
+  private fpsText: Phaser.GameObjects.Text | null = null;
+  private fpsHistory: number[] = [];
 
   update(time: number, delta: number): void {
+    // FPS tracking
+    const fps = 1000 / delta;
+    this.fpsHistory.push(fps);
+    if (this.fpsHistory.length > 60) this.fpsHistory.shift();
+    const avgFps = this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length;
+
+    // Update FPS display every 10 frames
     this.updateFrameCount++;
+    if (this.updateFrameCount % 10 === 0) {
+      if (!this.fpsText) {
+        this.fpsText = this.add.text(10, 10, '', { fontSize: '14px', color: '#00ff00', backgroundColor: '#000000' });
+        this.fpsText.setScrollFactor(0);
+        this.fpsText.setDepth(9999);
+      }
+      const minFps = Math.min(...this.fpsHistory);
+      this.fpsText.setText(`FPS: ${avgFps.toFixed(0)} (min: ${minFps.toFixed(0)})`);
+    }
+
+    if (this.updateFrameCount % 300 === 0) {
+      console.log('[DEBUG] GameScene update() frame', this.updateFrameCount, 'FPS:', avgFps.toFixed(0), 'active scenes:', this.scene.manager.getScenes(true).map(s => s.scene.key));
+    }
 
     // Update input
     this.inputManager?.update();
@@ -4601,60 +4623,6 @@ export class GameScene extends Phaser.Scene {
         container.add(glow);
         break;
       }
-
-      // Ultra-minimal boss effects (simple shapes only)
-      case GroundEffectType.TectonicQuadrant: {
-        // Just 4 colored quarter-circles - green=safe, red=danger
-        const r = effect.radius;
-        const safe = effect.safeQuadrant ?? 0;
-        const colors = [safe === 0 ? 0x00ff00 : 0xff0000, safe === 1 ? 0x00ff00 : 0xff0000,
-                        safe === 2 ? 0x00ff00 : 0xff0000, safe === 3 ? 0x00ff00 : 0xff0000];
-        const alphas = [safe === 0 ? 0.2 : 0.35, safe === 1 ? 0.2 : 0.35,
-                        safe === 2 ? 0.2 : 0.35, safe === 3 ? 0.2 : 0.35];
-        // Use simple arc for each quadrant
-        const q = this.add.graphics();
-        for (let i = 0; i < 4; i++) {
-          q.fillStyle(colors[i], alphas[i]);
-          q.slice(0, 0, r, -Math.PI + i * Math.PI/2, -Math.PI + (i+1) * Math.PI/2, false);
-          q.fillPath();
-        }
-        q.setName('quadrants');
-        container.add(q);
-        break;
-      }
-
-      case GroundEffectType.VoidGaze: {
-        // Simple cone shape
-        const cone = this.add.graphics();
-        const coneAngle = effect.coneAngle ?? Math.PI / 3;
-        cone.fillStyle(color, 0.3);
-        cone.slice(0, 0, effect.radius, -coneAngle/2, coneAngle/2, false);
-        cone.fillPath();
-        cone.lineStyle(2, color, 0.8);
-        cone.strokePath();
-        cone.setName('cone');
-        container.add(cone);
-        container.setRotation(effect.coneDirection ?? 0);
-        break;
-      }
-
-      case GroundEffectType.EncroachingDarkness: {
-        // Simple danger ring
-        const inner = effect.innerRadius ?? 0;
-        const ring = this.add.graphics();
-        ring.fillStyle(0x330033, 0.6);
-        ring.fillCircle(0, 0, effect.radius);
-        ring.fillStyle(0x000000, 1); // Cut out safe zone
-        ring.fillCircle(0, 0, Math.max(5, effect.radius - inner));
-        ring.setName('ring');
-        container.add(ring);
-        // Safe zone indicator
-        const safeCircle = this.add.circle(0, 0, Math.max(5, effect.radius - inner), 0x00ff00, 0.1);
-        safeCircle.setStrokeStyle(2, 0x00ff00, 0.5);
-        safeCircle.setName('safe');
-        container.add(safeCircle);
-        break;
-      }
     }
 
     // Add warning indicator for new effects
@@ -4713,36 +4681,6 @@ export class GameScene extends Phaser.Scene {
           if (trail2) {
             trail2.setPosition(-effect.direction.x * 30, -effect.direction.y * 30);
           }
-        }
-        break;
-      }
-
-      // Minimal boss effect updates
-      case GroundEffectType.TectonicQuadrant: {
-        // Pulse danger zones when active
-        const q = container.getByName('quadrants') as Phaser.GameObjects.Graphics;
-        if (q && effect.isActive) {
-          q.setAlpha(0.6 + Math.sin(this.time.now / 100) * 0.2);
-        }
-        break;
-      }
-
-      case GroundEffectType.VoidGaze: {
-        // Update rotation
-        container.setRotation(effect.coneDirection ?? 0);
-        // Pulse when active
-        const cone = container.getByName('cone') as Phaser.GameObjects.Graphics;
-        if (cone) cone.setAlpha(effect.isActive ? 0.6 : 0.3);
-        break;
-      }
-
-      case GroundEffectType.EncroachingDarkness: {
-        // Update safe zone size
-        const safe = container.getByName('safe') as Phaser.GameObjects.Arc;
-        const inner = effect.innerRadius ?? 0;
-        const safeR = Math.max(5, effect.radius - inner);
-        if (safe) {
-          safe.setRadius(safeR);
         }
         break;
       }
