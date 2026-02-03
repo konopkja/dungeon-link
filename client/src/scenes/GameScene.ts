@@ -1512,31 +1512,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateFrameCount = 0;
-  private fpsText: Phaser.GameObjects.Text | null = null;
-  private fpsHistory: number[] = [];
 
   update(time: number, delta: number): void {
-    // FPS tracking
-    const fps = 1000 / delta;
-    this.fpsHistory.push(fps);
-    if (this.fpsHistory.length > 60) this.fpsHistory.shift();
-    const avgFps = this.fpsHistory.reduce((a, b) => a + b, 0) / this.fpsHistory.length;
-
-    // Update FPS display every 10 frames
     this.updateFrameCount++;
-    if (this.updateFrameCount % 10 === 0) {
-      if (!this.fpsText) {
-        this.fpsText = this.add.text(10, 10, '', { fontSize: '14px', color: '#00ff00', backgroundColor: '#000000' });
-        this.fpsText.setScrollFactor(0);
-        this.fpsText.setDepth(9999);
-      }
-      const minFps = Math.min(...this.fpsHistory);
-      this.fpsText.setText(`FPS: ${avgFps.toFixed(0)} (min: ${minFps.toFixed(0)})`);
-    }
-
-    if (this.updateFrameCount % 300 === 0) {
-      console.log('[DEBUG] GameScene update() frame', this.updateFrameCount, 'FPS:', avgFps.toFixed(0), 'active scenes:', this.scene.manager.getScenes(true).map(s => s.scene.key));
-    }
 
     // Update input
     this.inputManager?.update();
