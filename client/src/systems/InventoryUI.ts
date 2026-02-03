@@ -95,10 +95,10 @@ export class InventoryUI {
   private tooltipBg: Phaser.GameObjects.Rectangle | null = null;
   private tooltipText: Phaser.GameObjects.Text | null = null;
 
-  // Collapsible set bonuses
+  // Collapsible set bonuses - rendered directly on scene, NOT in container
+  // (Phaser has issues with interactive elements inside containers - see BUG_FIXES_2026_02.md section 5)
   private expandedSetId: string | null = null;
-  private setHeaders: Map<string, Phaser.GameObjects.Text> = new Map();
-  private setBonusContainer: Phaser.GameObjects.Container | null = null;
+  private setBonusElements: Phaser.GameObjects.GameObject[] = []; // Dynamic elements created each update
   private bonusPanelX: number = 0;
   private bonusPanelY: number = 0;
   private bonusPanelW: number = 0;
@@ -285,13 +285,6 @@ export class InventoryUI {
     this.bonusPanelX = bonusX;
     this.bonusPanelY = topY + 45;
     this.bonusPanelW = bonusW;
-
-    // Container for collapsible set bonuses
-    this.setBonusContainer = this.scene.add.container(0, 0);
-    this.setBonusContainer.setDepth(this.DEPTH);
-    this.setBonusContainer.setScrollFactor(0);
-    this.setBonusContainer.setVisible(false);
-    this.allElements.push(this.setBonusContainer);
 
     // Placeholder text for when no sets are equipped
     this.setBonusText = this.addElement(this.scene.add.text(bonusX + 12, topY + 45, '', {
@@ -692,11 +685,15 @@ export class InventoryUI {
   }
 
   private updateCollapsibleSetBonuses(setCounts: Map<string, number>): void {
-    if (!this.setBonusContainer) return;
+    // CRITICAL: Render interactive elements DIRECTLY on scene, NOT in a container
+    // Phaser has issues with interactive elements inside containers - hit areas may be offset
+    // See BUG_FIXES_2026_02.md section 5 "UI Tooltip System - Common Pitfalls"
 
-    // Clear existing container content
-    this.setBonusContainer.removeAll(true);
-    this.setHeaders.clear();
+    // Clear old dynamic elements (destroy them completely)
+    for (const el of this.setBonusElements) {
+      el.destroy();
+    }
+    this.setBonusElements = [];
 
     // Show placeholder text if no sets
     if (setCounts.size === 0) {
@@ -704,17 +701,15 @@ export class InventoryUI {
         this.setBonusText.setText('No set bonuses\n\nCollect matching\nset pieces for\nbonuses!');
         this.setBonusText.setVisible(this.visible);
       }
-      this.setBonusContainer.setVisible(false);
       return;
     }
 
-    // Hide placeholder, show container
+    // Hide placeholder when sets exist
     if (this.setBonusText) {
       this.setBonusText.setVisible(false);
     }
-    this.setBonusContainer.setVisible(this.visible);
 
-    // Auto-expand first set if nothing is expanded
+    // Auto-expand first set if nothing is expanded or current expansion is invalid
     if (this.expandedSetId === null || !setCounts.has(this.expandedSetId)) {
       this.expandedSetId = setCounts.keys().next().value ?? null;
     }
@@ -728,7 +723,7 @@ export class InventoryUI {
       const isExpanded = this.expandedSetId === setId;
       const setName = SET_NAMES[setId] ?? setId;
 
-      // Create clickable header
+      // Create clickable header background - DIRECTLY ON SCENE
       const headerBg = this.scene.add.rectangle(
         this.bonusPanelX + this.bonusPanelW / 2,
         this.bonusPanelY + yOffset + headerHeight / 2,
@@ -739,8 +734,12 @@ export class InventoryUI {
       );
       headerBg.setStrokeStyle(1, isExpanded ? 0x4a6a4a : 0x3a4a3a);
       headerBg.setScrollFactor(0);
+      headerBg.setDepth(this.DEPTH + 1); // Above panel background
+      headerBg.setVisible(this.visible);
       headerBg.setInteractive({ useHandCursor: true });
+      this.setBonusElements.push(headerBg);
 
+      // Header text
       const arrow = isExpanded ? '▼' : '▶';
       const headerText = this.scene.add.text(
         this.bonusPanelX + 16,
@@ -756,26 +755,28 @@ export class InventoryUI {
       );
       headerText.setOrigin(0, 0.5);
       headerText.setScrollFactor(0);
+      headerText.setDepth(this.DEPTH + 2); // Above header bg
+      headerText.setVisible(this.visible);
+      this.setBonusElements.push(headerText);
 
-      // Store reference for updates
-      this.setHeaders.set(setId, headerText);
-
-      // Click handler for header
+      // Click handler - capture variables for closure
       const currentSetId = setId;
+      const capturedHeaderBg = headerBg;
+      const capturedHeaderText = headerText;
+
       headerBg.on('pointerover', () => {
-        headerBg.setFillStyle(0x3a4a3a);
-        headerText.setColor('#aaffaa');
+        capturedHeaderBg.setFillStyle(0x3a4a3a);
+        capturedHeaderText.setColor('#aaffaa');
       });
       headerBg.on('pointerout', () => {
         const expanded = this.expandedSetId === currentSetId;
-        headerBg.setFillStyle(expanded ? 0x2a3a2a : 0x1a2a1a);
-        headerText.setColor(expanded ? '#88ff88' : '#66cc66');
+        capturedHeaderBg.setFillStyle(expanded ? 0x2a3a2a : 0x1a2a1a);
+        capturedHeaderText.setColor(expanded ? '#88ff88' : '#66cc66');
       });
       headerBg.on('pointerdown', () => {
         this.toggleSetExpansion(currentSetId);
       });
 
-      this.setBonusContainer.add([headerBg, headerText]);
       yOffset += headerHeight + 4;
 
       // Show bonuses if expanded
@@ -799,7 +800,9 @@ export class InventoryUI {
               }
             );
             bonusText.setScrollFactor(0);
-            this.setBonusContainer.add(bonusText);
+            bonusText.setDepth(this.DEPTH + 1);
+            bonusText.setVisible(this.visible);
+            this.setBonusElements.push(bonusText);
             yOffset += lineHeight;
           }
         }
@@ -882,6 +885,10 @@ export class InventoryUI {
     for (const el of this.allElements) {
       if ('setVisible' in el) (el as any).setVisible(false);
     }
+    // Also hide dynamic set bonus elements (rendered directly on scene)
+    for (const el of this.setBonusElements) {
+      if ('setVisible' in el) (el as any).setVisible(false);
+    }
     this.hideTooltip();
   }
 
@@ -891,6 +898,9 @@ export class InventoryUI {
 
   destroy(): void {
     for (const el of this.allElements) el.destroy();
+    // Also destroy dynamic set bonus elements
+    for (const el of this.setBonusElements) el.destroy();
+    this.setBonusElements = [];
     this.tooltip?.destroy();
   }
 }

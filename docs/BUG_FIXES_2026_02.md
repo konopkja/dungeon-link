@@ -1072,6 +1072,115 @@ Missing ANY of steps 1-3 can cause state leakage bugs.
 
 ---
 
+## 14. Collapsible UI Elements Not Clickable (2026-02-03)
+
+### Problem
+
+Interactive elements (clickable headers for expanding/collapsing set bonuses) in the inventory UI were not responding to clicks. The cursor changed to a pointer (indicating interactivity was registered) but click/hover events never fired.
+
+### Root Cause
+
+The interactive elements were being added to a `Phaser.GameObjects.Container`:
+
+```typescript
+// BAD: Adding interactive elements to a container
+this.setBonusContainer = this.scene.add.container(0, 0);
+// ...
+const headerBg = this.scene.add.rectangle(...);
+headerBg.setInteractive({ useHandCursor: true });
+this.setBonusContainer.add([headerBg, headerText]); // Input won't work reliably!
+```
+
+**Phaser's input system has known issues with objects nested inside containers.** Hit areas may be offset or not properly registered when elements are inside containers.
+
+This was already documented in section 5 of this file ("UI Tooltip System - Common Pitfalls") but the knowledge wasn't applied when implementing the collapsible set bonuses.
+
+### Solution
+
+Render interactive elements **directly on the scene** instead of inside a container:
+
+```typescript
+// GOOD: Render interactive elements directly on scene
+const headerBg = this.scene.add.rectangle(
+  screenX, screenY, width, height, color
+);
+headerBg.setScrollFactor(0);     // Fixed to screen (UI element)
+headerBg.setDepth(this.DEPTH + 1); // Above panel background
+headerBg.setVisible(this.visible);
+headerBg.setInteractive({ useHandCursor: true }); // Input works reliably!
+
+// Track for later cleanup
+this.setBonusElements.push(headerBg);
+```
+
+### Key Changes (InventoryUI.ts)
+
+1. **Removed container approach:**
+   ```typescript
+   // OLD
+   private setBonusContainer: Phaser.GameObjects.Container | null = null;
+
+   // NEW
+   private setBonusElements: Phaser.GameObjects.GameObject[] = [];
+   ```
+
+2. **Elements created directly on scene:**
+   - Each element gets `setScrollFactor(0)` for fixed UI positioning
+   - Each element gets explicit `setDepth()` to layer correctly
+   - Each element gets `setVisible(this.visible)` for proper show/hide
+
+3. **Cleanup on update:**
+   ```typescript
+   // Destroy old elements before creating new ones
+   for (const el of this.setBonusElements) {
+     el.destroy();
+   }
+   this.setBonusElements = [];
+   ```
+
+4. **Hide/destroy handling:**
+   ```typescript
+   hide(): void {
+     // ... hide allElements ...
+     // Also hide dynamic set bonus elements
+     for (const el of this.setBonusElements) {
+       if ('setVisible' in el) (el as any).setVisible(false);
+     }
+   }
+
+   destroy(): void {
+     // ... destroy allElements ...
+     // Also destroy dynamic set bonus elements
+     for (const el of this.setBonusElements) el.destroy();
+     this.setBonusElements = [];
+   }
+   ```
+
+### Key Invariants
+
+| Invariant | Why It Matters |
+|-----------|----------------|
+| **Never put interactive elements in containers** | Phaser input system may not register hits correctly |
+| **Use setScrollFactor(0) for UI elements** | Keeps them fixed on screen regardless of camera |
+| **Track dynamic elements separately** | Need to destroy them on update/cleanup |
+| **Set explicit depth for layering** | Elements outside containers need manual depth management |
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `client/src/systems/InventoryUI.ts` | Refactored collapsible sets to render directly on scene |
+
+### Testing
+
+To verify the fix:
+1. Open inventory (press I)
+2. Equip 2+ pieces from a set
+3. Click on set headers - they should expand/collapse
+4. Verify hover effects work (color change on mouse over)
+
+---
+
 ## 13. Floor Persistence Bug - Additional Fix (2026-02-03)
 
 ### Problem
