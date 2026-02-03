@@ -925,20 +925,28 @@ export class GameScene extends Phaser.Scene {
       const existingFaceIcon = this.playerFrame.getByName('playerFrameFaceIcon') as Phaser.GameObjects.Image;
       const iconPlaceholder = this.playerFrame.getByName('playerFrameIconText') as Phaser.GameObjects.Text;
 
-      if (!existingFaceIcon && this.textures.exists(faceTextureKey)) {
+      if (this.textures.exists(faceTextureKey)) {
         // Hide the text placeholder
         if (iconPlaceholder) {
           iconPlaceholder.setVisible(false);
         }
 
-        // Add the face image
-        const iconSize = 44;
-        const iconX = 10;
-        const iconY = 10;
-        const faceIcon = this.add.image(iconX + iconSize / 2, iconY + iconSize / 2, faceTextureKey);
-        faceIcon.setDisplaySize(iconSize - 4, iconSize - 4); // Slight padding within the frame
-        faceIcon.setName('playerFrameFaceIcon');
-        this.playerFrame.add(faceIcon);
+        if (existingFaceIcon) {
+          // BUGFIX: Update existing icon if it's showing wrong class texture
+          // This fixes the bug where switching characters would show the old class's face
+          if (existingFaceIcon.texture.key !== faceTextureKey) {
+            existingFaceIcon.setTexture(faceTextureKey);
+          }
+        } else {
+          // Add the face image for the first time
+          const iconSize = 44;
+          const iconX = 10;
+          const iconY = 10;
+          const faceIcon = this.add.image(iconX + iconSize / 2, iconY + iconSize / 2, faceTextureKey);
+          faceIcon.setDisplaySize(iconSize - 4, iconSize - 4); // Slight padding within the frame
+          faceIcon.setName('playerFrameFaceIcon');
+          this.playerFrame.add(faceIcon);
+        }
       } else if (!existingFaceIcon && iconPlaceholder) {
         // No face texture available, use emoji fallback
         const classIcons: Record<string, string> = {
