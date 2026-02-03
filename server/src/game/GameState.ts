@@ -2283,6 +2283,14 @@ export class GameStateManager {
           case GroundEffectType.FirePool:
             // Static, just stays in place
             break;
+
+          case GroundEffectType.GravityWell:
+            // Slowly grow like void zone
+            if (effect.radius < effect.maxRadius) {
+              effect.radius += (effect.maxRadius / 3) * deltaTime; // Reach max in 3 seconds
+            }
+            // Pull players toward center (handled below in damage section)
+            break;
         }
 
         // Damage players standing in the effect
@@ -2297,7 +2305,38 @@ export class GameStateManager {
           const dy = player.position.y - effect.position.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
 
-          if (dist <= effect.radius) {
+          // Special handling for RotatingBeam - only damage players in the beam's path
+          // not the entire radius (fixes misleading clock animation)
+          let isInEffect = false;
+          if (effect.type === GroundEffectType.RotatingBeam && effect.direction) {
+            // Beam is a narrow cone in the direction it's pointing
+            // Player must be within the beam length AND within a 20-degree cone
+            if (dist <= effect.radius && dist > 20) { // Min distance to avoid always hitting at center
+              const playerAngle = Math.atan2(dy, dx);
+              const beamAngle = Math.atan2(effect.direction.y, effect.direction.x);
+              let angleDiff = Math.abs(playerAngle - beamAngle);
+              // Normalize angle difference to [0, PI]
+              if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+              // 20 degrees = ~0.35 radians - narrow beam
+              const beamHalfWidth = 0.35;
+              isInEffect = angleDiff <= beamHalfWidth;
+            }
+          } else {
+            // All other effects use circular radius check
+            isInEffect = dist <= effect.radius;
+          }
+
+          // GravityWell pulls players toward center (even if they're at the edge)
+          if (effect.type === GroundEffectType.GravityWell && dist <= effect.radius && dist > 10) {
+            // Pull strength increases as you get closer to center (more dramatic effect)
+            const pullStrength = 80 + (1 - dist / effect.radius) * 40; // 80-120 units/sec
+            const pullX = (-dx / dist) * pullStrength * deltaTime;
+            const pullY = (-dy / dist) * pullStrength * deltaTime;
+            player.position.x += pullX;
+            player.position.y += pullY;
+          }
+
+          if (isInEffect) {
             // Check damage tick
             const tickKey = `${effect.id}_${player.id}`;
             const lastTick = state.tracking.groundEffectDamageTicks.get(tickKey) ?? 0;
@@ -3946,18 +3985,18 @@ export class GameStateManager {
         };
       },
 
-      // Void Lord - void zones that grow
+      // Void Lord - gravity well that pulls players in (stay at edges!)
       'boss_void_lord': () => ({
         id: effectId,
-        type: GroundEffectType.VoidZone,
-        position: { ...targetPlayer.position },
+        type: GroundEffectType.GravityWell,
+        position: { ...boss.position }, // Centered on boss
         sourceId: boss.id,
-        radius: 15,
-        maxRadius: 100,
-        damage: baseDamage * 1.1,
-        tickInterval: 0.6,
-        duration: 6,
-        color: '#8844ff'
+        radius: 30,
+        maxRadius: 140, // Large pull area
+        damage: baseDamage * 0.8, // Lower damage but pull is dangerous
+        tickInterval: 0.5,
+        duration: 5,
+        color: '#4422aa' // Dark purple swirl
       }),
 
       // Titan - massive expanding slam

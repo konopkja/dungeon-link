@@ -169,16 +169,16 @@ export const BOSSES: BossDefinition[] = [
     abilities: ['void_bolt', 'shadow_nova', 'mind_control'],
     mechanics: [
       {
-        id: 'mind_control',
-        name: 'Puppet Strings',
-        description: 'Dominates a mind every 30 seconds',
-        intervalSeconds: 30
+        id: 'gravity_well',
+        name: 'Gravitational Collapse',
+        description: 'Creates a gravity well that pulls players in - stay at the edges!',
+        intervalSeconds: 15
       },
       {
         id: 'void_zones',
         name: 'Tears in Reality',
-        description: 'Opens rifts to the void every 10 seconds',
-        intervalSeconds: 10
+        description: 'Opens rifts to the void every 12 seconds',
+        intervalSeconds: 12
       }
     ],
     lootTable: [

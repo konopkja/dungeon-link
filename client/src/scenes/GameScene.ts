@@ -4650,6 +4650,42 @@ export class GameScene extends Phaser.Scene {
         container.add(glow);
         break;
       }
+
+      case GroundEffectType.GravityWell: {
+        // Outer ring showing max pull area
+        const outerRing = this.add.circle(0, 0, effect.radius, color, 0.15);
+        outerRing.setStrokeStyle(3, color, 0.6);
+        outerRing.setName('main_shape');
+        container.add(outerRing);
+
+        // Inner danger zone (dark core)
+        const innerCore = this.add.circle(0, 0, effect.radius * 0.3, color, 0.5);
+        innerCore.setName('inner_core');
+        container.add(innerCore);
+
+        // Animated spiral arms that rotate inward
+        for (let i = 0; i < 4; i++) {
+          const angle = (i / 4) * Math.PI * 2;
+          const armLength = effect.radius * 0.8;
+          const arm = this.add.arc(0, 0, armLength, Phaser.Math.RadToDeg(angle), Phaser.Math.RadToDeg(angle + 0.8), false, color, 0.4);
+          arm.setStrokeStyle(4, color, 0.7);
+          arm.setName(`spiral_${i}`);
+          container.add(arm);
+        }
+
+        // Pulsing center
+        this.tweens.add({
+          targets: innerCore,
+          scaleX: 1.3,
+          scaleY: 1.3,
+          alpha: 0.3,
+          duration: 600,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut'
+        });
+        break;
+      }
     }
 
     // Add warning indicator for new effects
@@ -4708,6 +4744,34 @@ export class GameScene extends Phaser.Scene {
           }
           if (trail2) {
             trail2.setPosition(-effect.direction.x * 30, -effect.direction.y * 30);
+          }
+        }
+        break;
+      }
+
+      case GroundEffectType.GravityWell: {
+        // Update outer ring radius as it grows
+        const outerRing = container.getByName('main_shape') as Phaser.GameObjects.Arc;
+        if (outerRing) {
+          outerRing.setRadius(effect.radius);
+        }
+
+        // Rotate spiral arms inward (creates sucking visual)
+        const rotationSpeed = 3; // radians per second
+        const currentRotation = container.rotation + rotationSpeed * 0.016; // ~60fps
+        container.setRotation(currentRotation);
+
+        // Update inner core size proportionally
+        const innerCore = container.getByName('inner_core') as Phaser.GameObjects.Arc;
+        if (innerCore) {
+          innerCore.setRadius(effect.radius * 0.3);
+        }
+
+        // Update spiral arm radii
+        for (let i = 0; i < 4; i++) {
+          const arm = container.getByName(`spiral_${i}`) as Phaser.GameObjects.Arc;
+          if (arm) {
+            arm.setRadius(effect.radius * 0.8);
           }
         }
         break;

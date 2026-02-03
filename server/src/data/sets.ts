@@ -29,7 +29,7 @@ export const ITEM_SETS: SetDefinition[] = [
       {
         piecesRequired: 4,
         bonusStats: {},
-        bonusDescription: 'Arcane Barrier: Spell crits generate a shield for 15% of damage dealt',
+        bonusDescription: 'Arcane Barrier: Spell crits generate 15% shield (max 50% HP, 8s)',
         specialEffect: 'arcane_barrier'
       },
       {

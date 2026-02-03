@@ -449,7 +449,8 @@ export enum GroundEffectType {
   FirePool = 'fire_pool', // Static fire on ground
   MovingWave = 'moving_wave', // Wave moving in one direction
   RotatingBeam = 'rotating_beam', // Beam rotating around boss
-  VoidZone = 'void_zone' // Growing dark zone
+  VoidZone = 'void_zone', // Growing dark zone
+  GravityWell = 'gravity_well' // Pulls players toward center - stay at edges!
 }
 
 export interface GroundEffect {

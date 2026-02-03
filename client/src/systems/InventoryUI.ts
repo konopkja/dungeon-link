@@ -15,7 +15,7 @@ const SET_BONUSES: Record<string, { pieces: number; desc: string }[]> = {
   'set_archmage': [
     { pieces: 2, desc: '(2) +15 Spell, +30 Mana' },
     { pieces: 3, desc: '(3) +8% Crit, +5% Haste' },
-    { pieces: 4, desc: '(4) Arcane Barrier: Crits shield' },
+    { pieces: 4, desc: '(4) Arcane Barrier: 15% shield (max 50% HP)' },
     { pieces: 5, desc: '(5) Critical Mass: Crit resets CD' }
   ],
   'set_bladestorm': [
