@@ -3,9 +3,6 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { ClientMessage, ServerMessage, ClassName } from '@dungeon-link/shared';
 import { WS_CONFIG, GAME_CONFIG } from '@dungeon-link/shared';
 import { gameStateManager } from './game/GameState.js';
-
-// Set to true to enable verbose debug logging (CAUSES LAG - only for debugging)
-const DEBUG_LOGGING = false;
 import {
   handleWalletConnect,
   handleWalletDisconnect,
@@ -30,8 +27,6 @@ export class GameWebSocketServer {
   private wss: WebSocketServer;
   private httpServer: ReturnType<typeof createServer>;
   private clients: Map<WebSocket, ClientConnection> = new Map();
-  // Optimization: Direct lookup of clients by runId (O(1) instead of O(n))
-  private runClients: Map<string, Set<WebSocket>> = new Map();
   private updateInterval: NodeJS.Timeout | null = null;
 
   constructor(port: number = WS_CONFIG.PORT) {
@@ -82,7 +77,7 @@ export class GameWebSocketServer {
 
     ws.on('message', (data) => {
       try {
-        if (DEBUG_LOGGING) console.log('[DEBUG] Received message:', data.toString().substring(0, 100));
+        console.log('[DEBUG] Received message:', data.toString().substring(0, 100));
         const message = JSON.parse(data.toString()) as ClientMessage;
         this.handleMessage(client, message);
       } catch (error) {
@@ -98,8 +93,6 @@ export class GameWebSocketServer {
         // Clean up crypto state (single-player: always cleanup on disconnect)
         if (client.runId) {
           cleanupCryptoState(client.runId);
-          // Remove from run lookup
-          this.removeClientFromRun(ws, client.runId);
         }
       }
       this.clients.delete(ws);
@@ -114,25 +107,22 @@ export class GameWebSocketServer {
     switch (message.type) {
       case 'CREATE_RUN': {
         try {
-          if (DEBUG_LOGGING) console.log('[DEBUG] Creating run for', message.playerName, message.classId);
+          console.log('[DEBUG] Creating run for', message.playerName, message.classId);
           const result = gameStateManager.createRun(message.playerName, message.classId);
-          if (DEBUG_LOGGING) console.log('[DEBUG] Run created:', result.runId);
+          console.log('[DEBUG] Run created:', result.runId);
           client.playerId = result.playerId;
           client.runId = result.runId;
-
-          // Register client in run lookup (O(1) broadcast optimization)
-          this.addClientToRun(client.ws, result.runId);
 
           // Initialize crypto state for this run
           initializeCryptoState(result.runId);
 
-          if (DEBUG_LOGGING) console.log('[DEBUG] Sending RUN_CREATED response');
+          console.log('[DEBUG] Sending RUN_CREATED response');
           this.send(client.ws, {
             type: 'RUN_CREATED',
             runId: result.runId,
             state: result.state
           });
-          if (DEBUG_LOGGING) console.log('[DEBUG] RUN_CREATED sent successfully');
+          console.log('[DEBUG] RUN_CREATED sent successfully');
         } catch (error) {
           console.error('[ERROR] Failed to create run:', error);
         }
@@ -143,9 +133,6 @@ export class GameWebSocketServer {
         const result = gameStateManager.createRunFromSave(message.saveData);
         client.playerId = result.playerId;
         client.runId = result.runId;
-
-        // Register client in run lookup (O(1) broadcast optimization)
-        this.addClientToRun(client.ws, result.runId);
 
         // Initialize crypto state for this run
         initializeCryptoState(result.runId);
@@ -236,20 +223,20 @@ export class GameWebSocketServer {
       }
 
       case 'INTERACT_VENDOR': {
-        if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - playerId:', client.playerId, 'runId:', client.runId, 'vendorId:', message.vendorId);
+        console.log('[DEBUG] INTERACT_VENDOR - playerId:', client.playerId, 'runId:', client.runId, 'vendorId:', message.vendorId);
         if (!client.playerId || !client.runId) {
-          if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - missing playerId or runId');
+          console.log('[DEBUG] INTERACT_VENDOR - missing playerId or runId');
           return;
         }
         const services = gameStateManager.getVendorServices(client.playerId, message.vendorId);
-        if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - services:', services);
+        console.log('[DEBUG] INTERACT_VENDOR - services:', services);
         // Always send response, even if services is null (send empty array)
         this.send(client.ws, {
           type: 'VENDOR_SERVICES',
           vendorId: message.vendorId,
           services: services || []
         });
-        if (DEBUG_LOGGING) console.log('[DEBUG] INTERACT_VENDOR - sent VENDOR_SERVICES with', (services || []).length, 'services');
+        console.log('[DEBUG] INTERACT_VENDOR - sent VENDOR_SERVICES with', (services || []).length, 'services');
         break;
       }
 
@@ -350,7 +337,7 @@ export class GameWebSocketServer {
     this.updateInterval = setInterval(() => {
       const updates = gameStateManager.update();
 
-      for (const [runId, { state, events, tauntEvents, collectedItems, soulstoneRevives }] of updates) {
+      for (const [runId, { state, events, tauntEvents, collectedItems }] of updates) {
         // Broadcast state update
         this.broadcastToRun(runId, {
           type: 'STATE_UPDATE',
@@ -370,15 +357,6 @@ export class GameWebSocketServer {
           this.broadcastToRun(runId, {
             type: 'TAUNT_EVENT',
             event
-          });
-        }
-
-        // Broadcast Soulstone revive events (for sound/animation)
-        for (const revive of soulstoneRevives) {
-          this.broadcastToRun(runId, {
-            type: 'SOULSTONE_REVIVE',
-            playerId: revive.playerId,
-            position: revive.position
           });
         }
 
@@ -410,35 +388,10 @@ export class GameWebSocketServer {
     }
   }
 
-  // Helper to add client to run lookup
-  private addClientToRun(ws: WebSocket, runId: string): void {
-    if (!this.runClients.has(runId)) {
-      this.runClients.set(runId, new Set());
-    }
-    this.runClients.get(runId)!.add(ws);
-  }
-
-  // Helper to remove client from run lookup
-  private removeClientFromRun(ws: WebSocket, runId: string): void {
-    const clients = this.runClients.get(runId);
-    if (clients) {
-      clients.delete(ws);
-      if (clients.size === 0) {
-        this.runClients.delete(runId);
-      }
-    }
-  }
-
-  // Optimized broadcast: O(1) lookup + single JSON.stringify
   private broadcastToRun(runId: string, message: ServerMessage, exclude?: WebSocket): void {
-    const clients = this.runClients.get(runId);
-    if (!clients || clients.size === 0) return;
-
-    // Stringify once, send to all clients in run
-    const data = JSON.stringify(message);
-    for (const ws of clients) {
-      if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
+    for (const [ws, client] of this.clients) {
+      if (client.runId === runId && ws !== exclude) {
+        this.send(ws, message);
       }
     }
   }
