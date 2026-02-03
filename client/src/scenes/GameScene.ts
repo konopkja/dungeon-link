@@ -3911,23 +3911,22 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Update position with interpolation for smooth movement
-      const targetKey = `player_${player.id}`;
-      this.targetPositions.set(targetKey, { x: player.position.x, y: player.position.y });
-
-      const target = this.targetPositions.get(targetKey)!;
-      const currentX = sprite.x;
-      const currentY = sprite.y;
-
-      // Lerp toward target position
-      const newX = currentX + (target.x - currentX) * this.LERP_SPEED;
-      const newY = currentY + (target.y - currentY) * this.LERP_SPEED;
-      sprite.setPosition(newX, newY);
-
-      // Highlight current player
+      // Check if this is the current player
       const isCurrentPlayer = player.id === wsClient.playerId;
+
       if (isCurrentPlayer) {
+        // Current player: NO interpolation - snap to server position for responsive feel
+        sprite.setPosition(player.position.x, player.position.y);
         sprite.setTint(0xffffff);
+      } else {
+        // Other players: interpolate for smooth movement
+        const targetKey = `player_${player.id}`;
+        this.targetPositions.set(targetKey, { x: player.position.x, y: player.position.y });
+
+        const target = this.targetPositions.get(targetKey)!;
+        const newX = sprite.x + (target.x - sprite.x) * this.LERP_SPEED;
+        const newY = sprite.y + (target.y - sprite.y) * this.LERP_SPEED;
+        sprite.setPosition(newX, newY);
       }
 
       // Update health bar using interpolated position (sprite.x/y, not server position)
