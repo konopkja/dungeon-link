@@ -34,8 +34,11 @@ export const GAME_CONFIG = {
   GOLD_DROP_MAX: 50,
 
   // Scaling
+  // FIX: Reduced damage scaling from 1.10 to 1.08 to address floor 8+ difficulty spike
+  // Previous: Floor 8 = 1.95x, Floor 9 = 2.14x damage (too punishing)
+  // New: Floor 8 = 1.71x, Floor 9 = 1.85x damage (more gradual progression)
   FLOOR_HEALTH_SCALE: 1.15, // 15% more health per floor
-  FLOOR_DAMAGE_SCALE: 1.10, // 10% more damage per floor
+  FLOOR_DAMAGE_SCALE: 1.08, // 8% more damage per floor (reduced from 10%)
   FLOOR_LOOT_SCALE: 1.12, // 12% better stats per floor
 
   // Party scaling

@@ -919,10 +919,28 @@ export class GameStateManager {
               state.dungeon.currentRoomId = newRoom.id;
 
               // Clear aggro times for enemies in the new room so they have fresh aggro delay
+              // FIX: Add staggered aggro delay variation (0.5-1.5s) to prevent all enemies attacking at once
               for (const enemy of newRoom.enemies) {
                 state.tracking.enemyAggroTimes.delete(enemy.id);
                 // Reset attack cooldowns so enemies don't immediately attack
                 state.tracking.attackCooldowns.delete(enemy.id);
+
+                // FIX: Set initial cooldowns for boss abilities and AoE to prevent burst damage on aggro
+                // Without this, all boss abilities start at 0 cooldown and fire back-to-back
+                if (enemy.isBoss && enemy.bossId) {
+                  const bossAbilities = getBossAbilitiesForFloor(enemy.bossId, state.floor);
+                  for (const abilityId of bossAbilities) {
+                    const cdKey = `${enemy.id}_${abilityId}`;
+                    // Initial ability cooldown: 3-5 seconds (randomized to feel more natural)
+                    const initialCooldown = 3 + Math.random() * 2;
+                    state.tracking.bossAbilityCooldowns.set(cdKey, initialCooldown);
+                  }
+                  // Initial AoE cooldown: 4-6 seconds (slightly longer to give players time to position)
+                  const aoECdKey = `${enemy.id}_aoe`;
+                  const initialAoECooldown = 4 + Math.random() * 2;
+                  state.tracking.bossAoECooldowns.set(aoECdKey, initialAoECooldown);
+                  console.log(`[DEBUG] Set initial boss cooldowns for ${enemy.name}: abilities=3-5s, AoE=4-6s`);
+                }
 
                 // Ensure enemy position is inside the room (fix stuck enemies)
                 const roomCenterX = newRoom.x + newRoom.width / 2;
@@ -1655,8 +1673,13 @@ export class GameStateManager {
             }
 
             // Track aggro time when enemy first spots a player
+            // FIX: Add staggered aggro delay (0 to 500ms random offset) to prevent all enemies
+            // in a room from attacking at exactly the same time after the base 1s delay
+            // By setting aggro time slightly in the future, timeSinceAggro starts negative,
+            // effectively adding extra delay before the enemy can attack
             if (!state.tracking.enemyAggroTimes.has(enemy.id)) {
-              state.tracking.enemyAggroTimes.set(enemy.id, Date.now());
+              const staggerOffset = Math.random() * 500; // 0-500ms random stagger
+              state.tracking.enemyAggroTimes.set(enemy.id, Date.now() + staggerOffset);
             }
 
             // Get attack range based on enemy type
