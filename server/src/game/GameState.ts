@@ -14,6 +14,7 @@ import { generateBossLoot, generateRareLoot, generateEnemyLoot, applyLootDrop, r
 import { getPartyScaling } from '../data/scaling.js';
 import { getBossAbilitiesForFloor } from '../data/bosses.js';
 import { awardXP, getEnemyXP, initializePlayerLevel } from '../data/leveling.js';
+import { hasSetEffect } from '../data/sets.js';
 
 export class GameStateManager {
   private runs: Map<string, RunState> = new Map();
@@ -1247,6 +1248,13 @@ export class GameStateManager {
             const reduction = 100 / (100 + armor);
             let damage = Math.round(baseDamage * reduction);
 
+            // SET EFFECT: Vengeance (Bulwark 4pc) - Each stack gives +3% damage
+            const vengeanceBuff = player.buffs.find(b => b.icon === 'set_vengeance');
+            if (vengeanceBuff && vengeanceBuff.stacks) {
+              const damageBonus = 1 + (vengeanceBuff.stacks * 0.03); // +3% per stack
+              damage = Math.round(damage * damageBonus);
+            }
+
             // Stealth bonus: 50% extra damage when attacking from Vanish
             const isStealthed = player.buffs.some(b => b.icon === 'rogue_vanish');
             if (isStealthed) {
@@ -1333,9 +1341,17 @@ export class GameStateManager {
             }
 
             // Set cooldown - Blade Flurry doubles attack speed (halves cooldown)
-            const attackCooldown = hasBladeFlurry
+            let attackCooldown = hasBladeFlurry
               ? this.PLAYER_AUTO_ATTACK_COOLDOWN / 2
               : this.PLAYER_AUTO_ATTACK_COOLDOWN;
+
+            // SET EFFECT: Bloodthirst (Bladestorm 4pc) - Each stack gives +10% attack speed
+            const bloodthirstBuff = player.buffs.find(b => b.icon === 'set_bloodthirst');
+            if (bloodthirstBuff && bloodthirstBuff.stacks) {
+              const attackSpeedBonus = bloodthirstBuff.stacks * 0.10; // 10% per stack
+              attackCooldown = attackCooldown * (1 - attackSpeedBonus);
+            }
+
             state.tracking.attackCooldowns.set(player.id, attackCooldown);
           }
         }
@@ -2749,6 +2765,28 @@ export class GameStateManager {
   private handleEnemyDeath(state: RunState, enemy: Enemy, killer: Player): void {
     // Clear aggro time for dead enemy
     state.tracking.enemyAggroTimes.delete(enemy.id);
+
+    // SET EFFECT: Bloodthirst (Bladestorm 4pc) - Kills grant +10% attack speed for 6s (stacks 3x)
+    if (hasSetEffect(killer.equipment, 'bloodthirst')) {
+      const existingBuff = killer.buffs.find(b => b.icon === 'set_bloodthirst');
+      if (existingBuff) {
+        // Stack up to 3x, refresh duration
+        existingBuff.stacks = Math.min((existingBuff.stacks ?? 1) + 1, 3);
+        existingBuff.duration = 6;
+        console.log(`[DEBUG] Bloodthirst stacked to ${existingBuff.stacks}x (+${existingBuff.stacks * 10}% attack speed)`);
+      } else {
+        killer.buffs.push({
+          id: `bloodthirst_${Date.now()}`,
+          icon: 'set_bloodthirst',
+          name: 'Bloodthirst',
+          duration: 6,
+          maxDuration: 6,
+          isDebuff: false,
+          stacks: 1 // Each stack = +10% attack speed
+        });
+        console.log(`[DEBUG] Bloodthirst activated (+10% attack speed)`);
+      }
+    }
 
     // Award XP to killer
     const xpAmount = getEnemyXP(state.floor, enemy.isBoss, enemy.isRare);

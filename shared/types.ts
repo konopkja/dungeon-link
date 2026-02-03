@@ -157,6 +157,8 @@ export interface SetBonus {
   piecesRequired: number;
   bonusStats: ItemStats;
   bonusDescription: string;
+  // Special set effects that provide unique mechanics beyond stat bonuses
+  specialEffect?: 'arcane_barrier' | 'critical_mass' | 'bloodthirst' | 'vengeance' | 'thorns';
 }
 
 export interface SetDefinition {

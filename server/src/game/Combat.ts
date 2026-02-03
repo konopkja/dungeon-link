@@ -2,6 +2,7 @@ import { Player, Enemy, CombatEvent, Stats, Position, Buff } from '@dungeon-link
 import { GAME_CONFIG } from '@dungeon-link/shared';
 import { getAbilityById } from '../data/classes.js';
 import { scaleAbilityDamage } from '../data/scaling.js';
+import { hasSetEffect } from '../data/sets.js';
 
 export interface CombatResult {
   events: CombatEvent[];
@@ -164,6 +165,13 @@ export function processAbilityCast(
         console.log(`[DEBUG] Crusader Strike COMBO! Target stunned by Judgment - 50% bonus damage: ${totalDamage}`);
       }
 
+      // SET EFFECT: Vengeance (Bulwark 4pc) - Each stack gives +3% damage
+      const vengeanceBuff = caster.buffs.find(b => b.icon === 'set_vengeance');
+      if (vengeanceBuff && vengeanceBuff.stacks) {
+        const damageBonus = 1 + (vengeanceBuff.stacks * 0.03); // +3% per stack
+        totalDamage = Math.round(totalDamage * damageBonus);
+      }
+
       // Apply armor/resist reduction
       const armor = caster.stats.spellPower > caster.stats.attackPower
         ? targetEntity.stats.resist
@@ -176,6 +184,47 @@ export function processAbilityCast(
       const isCrit = Math.random() * 100 < caster.stats.crit;
       if (isCrit) {
         finalDamage = Math.round(finalDamage * GAME_CONFIG.CRIT_DAMAGE_MULTIPLIER);
+
+        // SET EFFECT: Arcane Barrier (Archmage 4pc) - Spell crits generate shield
+        // Only applies to spell damage (spellPower > attackPower)
+        const isSpellDamage = caster.stats.spellPower > caster.stats.attackPower;
+        if (isSpellDamage && hasSetEffect(caster.equipment, 'arcane_barrier')) {
+          const generatedShield = Math.round(finalDamage * 0.15); // 15% of damage dealt
+          // Add or refresh Arcane Barrier buff
+          const existingBarrier = caster.buffs.find(b => b.icon === 'set_arcane_barrier');
+          if (existingBarrier) {
+            // Stack shields up to 50% max HP
+            const maxShield = Math.round(caster.stats.maxHealth * 0.5);
+            existingBarrier.shieldAmount = Math.min((existingBarrier.shieldAmount ?? 0) + generatedShield, maxShield);
+            existingBarrier.duration = 8; // Refresh duration
+          } else {
+            caster.buffs.push({
+              id: `arcane_barrier_${Date.now()}`,
+              icon: 'set_arcane_barrier',
+              name: 'Arcane Barrier',
+              duration: 8,
+              maxDuration: 8,
+              isDebuff: false,
+              shieldAmount: generatedShield
+            });
+          }
+          console.log(`[DEBUG] Arcane Barrier generated ${generatedShield} shield from spell crit`);
+        }
+
+        // SET EFFECT: Critical Mass (Archmage 5pc) - 30% chance to reset random ability cooldown
+        if (isSpellDamage && hasSetEffect(caster.equipment, 'critical_mass')) {
+          if (Math.random() < 0.30) { // 30% chance
+            // Find abilities on cooldown (excluding the one just cast)
+            const abilitiesOnCooldown = caster.abilities.filter(a =>
+              a.currentCooldown > 0 && a.abilityId !== abilityId
+            );
+            if (abilitiesOnCooldown.length > 0) {
+              const resetAbility = abilitiesOnCooldown[Math.floor(Math.random() * abilitiesOnCooldown.length)];
+              resetAbility.currentCooldown = 0;
+              console.log(`[DEBUG] Critical Mass reset cooldown on ${resetAbility.abilityId}`);
+            }
+          }
+        }
       }
 
       targetEntity.stats.health = Math.max(0, targetEntity.stats.health - finalDamage);
@@ -552,6 +601,76 @@ export function processEnemyAttack(
     result.events[0].blocked = (result.events[0].blocked ?? 0) + damageReduction; // Track blocked amount for UI
 
     console.log(`[DEBUG] Shield Wall reduced damage from ${originalDamage} to ${reducedDamage}`);
+  }
+
+  // SET EFFECT: Arcane Barrier (Archmage 4pc) - Shield absorbs damage before health
+  const arcaneBarrierBuff = target.buffs.find(b => b.icon === 'set_arcane_barrier');
+  if (arcaneBarrierBuff && arcaneBarrierBuff.shieldAmount && arcaneBarrierBuff.shieldAmount > 0 && result.events.length > 0 && result.events[0].damage) {
+    const incomingDamage = result.events[0].damage;
+    const shieldValue = arcaneBarrierBuff.shieldAmount;
+
+    if (shieldValue >= incomingDamage) {
+      // Shield absorbs all damage
+      arcaneBarrierBuff.shieldAmount = shieldValue - incomingDamage;
+      target.stats.health = Math.min(target.stats.maxHealth, target.stats.health + incomingDamage); // Restore the health that was subtracted
+      result.events[0].blocked = (result.events[0].blocked ?? 0) + incomingDamage;
+      console.log(`[DEBUG] Arcane Barrier absorbed ${incomingDamage} damage (${arcaneBarrierBuff.shieldAmount} shield remaining)`);
+    } else {
+      // Shield breaks, remaining damage goes through
+      const absorbed = shieldValue;
+      target.stats.health = Math.min(target.stats.maxHealth, target.stats.health + absorbed);
+      result.events[0].blocked = (result.events[0].blocked ?? 0) + absorbed;
+      // Remove depleted barrier buff
+      target.buffs = target.buffs.filter(b => b.icon !== 'set_arcane_barrier');
+      console.log(`[DEBUG] Arcane Barrier broke after absorbing ${absorbed} damage`);
+    }
+  }
+
+  // SET EFFECT: Vengeance (Bulwark 4pc) - When hit, gain +3% damage for 6s (stacks 5x)
+  if (result.events.length > 0 && result.events[0].damage && result.events[0].damage > 0) {
+    if (hasSetEffect(target.equipment, 'vengeance')) {
+      const existingBuff = target.buffs.find(b => b.icon === 'set_vengeance');
+      if (existingBuff) {
+        existingBuff.stacks = Math.min((existingBuff.stacks ?? 1) + 1, 5);
+        existingBuff.duration = 6;
+        console.log(`[DEBUG] Vengeance stacked to ${existingBuff.stacks}x (+${existingBuff.stacks * 3}% damage)`);
+      } else {
+        target.buffs.push({
+          id: `vengeance_${Date.now()}`,
+          icon: 'set_vengeance',
+          name: 'Vengeance',
+          duration: 6,
+          maxDuration: 6,
+          isDebuff: false,
+          stacks: 1 // Each stack = +3% damage
+        });
+        console.log(`[DEBUG] Vengeance activated (+3% damage)`);
+      }
+    }
+  }
+
+  // SET EFFECT: Thorns (Bulwark 5pc) - Reflect 20% of damage taken back to attacker
+  if (hasSetEffect(target.equipment, 'thorns') && result.events.length > 0 && result.events[0].damage) {
+    const thornsDamage = Math.round(result.events[0].damage * 0.20);
+    if (thornsDamage > 0) {
+      enemy.stats.health = Math.max(0, enemy.stats.health - thornsDamage);
+
+      if (enemy.stats.health <= 0) {
+        enemy.isAlive = false;
+      }
+
+      // Add thorns damage event
+      result.events.push({
+        sourceId: target.id,
+        targetId: enemy.id,
+        damage: thornsDamage,
+        abilityId: 'set_thorns',
+        isCrit: false,
+        killed: !enemy.isAlive
+      });
+
+      console.log(`[DEBUG] Thorns reflected ${thornsDamage} damage back to ${enemy.name}`);
+    }
   }
 
   // Check for Retaliation buff - reflect damage back to attacker

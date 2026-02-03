@@ -8,6 +8,7 @@ import { SeededRNG } from '../utils/SeededRNG.js';
 export const ITEM_SETS: SetDefinition[] = [
   // ============================================
   // CASTER SET - Archmage's Regalia
+  // Sustain through shields and cooldown resets
   // ============================================
   {
     id: 'set_archmage',
@@ -26,15 +27,23 @@ export const ITEM_SETS: SetDefinition[] = [
         bonusDescription: '+8% Crit, +5% Haste, +1% Lifesteal'
       },
       {
+        piecesRequired: 4,
+        bonusStats: {},
+        bonusDescription: 'Arcane Barrier: Spell crits generate a shield for 15% of damage dealt',
+        specialEffect: 'arcane_barrier'
+      },
+      {
         piecesRequired: 5,
-        bonusStats: { spellPower: 40, mana: 50, crit: 10, lifesteal: 2 },
-        bonusDescription: '+40 Spell Power, +50 Mana, +10% Crit, +2% Lifesteal'
+        bonusStats: { spellPower: 40, mana: 50, crit: 10 },
+        bonusDescription: '+40 Spell, +50 Mana, +10% Crit. Critical Mass: Spell crits have 30% chance to reset a random ability cooldown',
+        specialEffect: 'critical_mass'
       }
     ]
   },
 
   // ============================================
   // MELEE DPS SET - Bladestorm Battlegear
+  // Sustain through lifesteal and kill momentum
   // ============================================
   {
     id: 'set_bladestorm',
@@ -53,6 +62,12 @@ export const ITEM_SETS: SetDefinition[] = [
         bonusDescription: '+10% Haste, +3% Lifesteal'
       },
       {
+        piecesRequired: 4,
+        bonusStats: {},
+        bonusDescription: 'Bloodthirst: Kills grant +10% attack speed for 6s (stacks 3x)',
+        specialEffect: 'bloodthirst'
+      },
+      {
         piecesRequired: 5,
         bonusStats: { attackPower: 45, crit: 12, lifesteal: 5 },
         bonusDescription: '+45 Attack Power, +12% Crit, +5% Lifesteal'
@@ -62,6 +77,7 @@ export const ITEM_SETS: SetDefinition[] = [
 
   // ============================================
   // TANK SET - Bulwark of the Fortress
+  // Sustain through revenge mechanics (damage ramp + thorns)
   // ============================================
   {
     id: 'set_bulwark',
@@ -80,9 +96,16 @@ export const ITEM_SETS: SetDefinition[] = [
         bonusDescription: '+10 Resist, +30 Health'
       },
       {
+        piecesRequired: 4,
+        bonusStats: {},
+        bonusDescription: 'Vengeance: When hit, gain +3% damage for 6s (stacks 5x)',
+        specialEffect: 'vengeance'
+      },
+      {
         piecesRequired: 5,
         bonusStats: { armor: 50, health: 150, resist: 15 },
-        bonusDescription: '+50 Armor, +150 Health, +15 Resist'
+        bonusDescription: '+50 Armor, +150 HP, +15 Resist. Thorns: Reflect 20% of damage taken',
+        specialEffect: 'thorns'
       }
     ]
   }
@@ -302,4 +325,45 @@ export function calculateSetBonuses(equipment: Record<EquipSlot, Item | null>): 
   }
 
   return { activeSets, totalBonusStats };
+}
+
+/**
+ * Check if a player has a specific set effect active based on their equipment
+ * Returns true if the effect is active, false otherwise
+ */
+export function hasSetEffect(
+  equipment: Record<EquipSlot, Item | null>,
+  effectName: 'arcane_barrier' | 'critical_mass' | 'bloodthirst' | 'vengeance' | 'thorns'
+): boolean {
+  const { activeSets } = calculateSetBonuses(equipment);
+
+  for (const { activeBonuses } of activeSets) {
+    for (const bonus of activeBonuses) {
+      if (bonus.specialEffect === effectName) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Get all active special effects for a player's equipment
+ */
+export function getActiveSetEffects(
+  equipment: Record<EquipSlot, Item | null>
+): Array<'arcane_barrier' | 'critical_mass' | 'bloodthirst' | 'vengeance' | 'thorns'> {
+  const { activeSets } = calculateSetBonuses(equipment);
+  const effects: Array<'arcane_barrier' | 'critical_mass' | 'bloodthirst' | 'vengeance' | 'thorns'> = [];
+
+  for (const { activeBonuses } of activeSets) {
+    for (const bonus of activeBonuses) {
+      if (bonus.specialEffect && !effects.includes(bonus.specialEffect)) {
+        effects.push(bonus.specialEffect);
+      }
+    }
+  }
+
+  return effects;
 }

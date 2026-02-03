@@ -15,17 +15,20 @@ const SET_BONUSES: Record<string, { pieces: number; desc: string }[]> = {
   'set_archmage': [
     { pieces: 2, desc: '(2) +15 Spell, +30 Mana' },
     { pieces: 3, desc: '(3) +8% Crit, +5% Haste' },
-    { pieces: 5, desc: '(5) +40 Spell, +50 Mana' }
+    { pieces: 4, desc: '(4) Arcane Barrier: Crits shield' },
+    { pieces: 5, desc: '(5) Critical Mass: Crit resets CD' }
   ],
   'set_bladestorm': [
     { pieces: 2, desc: '(2) +15 Attack, +5% Crit' },
     { pieces: 3, desc: '(3) +10% Haste, +3% Life' },
-    { pieces: 5, desc: '(5) +45 Atk, +12% Crit' }
+    { pieces: 4, desc: '(4) Bloodthirst: Kills +Atk Spd' },
+    { pieces: 5, desc: '(5) +45 Atk, +12% Crit, +5% Life' }
   ],
   'set_bulwark': [
     { pieces: 2, desc: '(2) +20 Armor, +50 HP' },
     { pieces: 3, desc: '(3) +10 Resist, +30 HP' },
-    { pieces: 5, desc: '(5) +50 Armor, +150 HP' }
+    { pieces: 4, desc: '(4) Vengeance: Hits +3% Dmg' },
+    { pieces: 5, desc: '(5) Thorns: Reflect 20% Dmg' }
   ]
 };
 
