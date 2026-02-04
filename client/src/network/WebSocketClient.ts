@@ -21,6 +21,11 @@ export class WebSocketClient {
   private reconnectAttempts = 0;
   private reconnectTimeout: number | null = null;
 
+  // State deduplication - prevents processing identical updates
+  // See docs/PERFORMANCE-STATE-UPDATES.md for context
+  private lastStateHash: string = '';
+  private duplicateCount: number = 0;
+
   // Game state received from server
   public runId: string | null = null;
   public playerId: string | null = null;
@@ -128,6 +133,18 @@ export class WebSocketClient {
         break;
 
       case 'STATE_UPDATE':
+        // Deduplicate state updates to prevent unnecessary processing
+        // Server should already filter unchanged states, but this is a safety net
+        const stateHash = this.computeStateHash(message.state);
+        if (stateHash === this.lastStateHash) {
+          this.duplicateCount++;
+          if (DEBUG_LOGGING) {
+            console.log(`[WS] Skipped duplicate STATE_UPDATE (${this.duplicateCount} duplicates)`);
+          }
+          return; // Skip processing, don't notify handlers
+        }
+        this.lastStateHash = stateHash;
+        this.duplicateCount = 0;
         this.currentState = message.state;
         break;
 
@@ -170,6 +187,9 @@ export class WebSocketClient {
     // Reset lives and save slot for new character
     this.currentLives = 5;
     this.currentSaveSlot = null;
+    // Reset state hash to ensure first state update is processed
+    this.lastStateHash = '';
+    this.duplicateCount = 0;
     this.send({ type: 'CREATE_RUN', playerName, classId });
   }
 
@@ -456,6 +476,9 @@ export class WebSocketClient {
     // Store the save slot and lives for tracking
     this.currentSaveSlot = slot;
     this.currentLives = saveData.lives ?? 5; // Default to 5 for old saves
+    // Reset state hash to ensure first state update is processed
+    this.lastStateHash = '';
+    this.duplicateCount = 0;
     this.send({ type: 'CREATE_RUN_FROM_SAVE', saveData });
   }
 
@@ -501,6 +524,60 @@ export class WebSocketClient {
     this.messageHandlers.clear();
     this.connectHandlers.clear();
     this.disconnectHandlers.clear();
+  }
+
+  /**
+   * Compute a lightweight hash of the game state for deduplication.
+   * Focuses on frequently-changing data to detect meaningful changes.
+   * See docs/PERFORMANCE-STATE-UPDATES.md for context.
+   */
+  private computeStateHash(state: RunState): string {
+    // Fast hash focusing on key changing elements
+    const parts: string[] = [
+      state.runId,
+      String(state.floor),
+      String(state.inCombat),
+      state.dungeon?.currentRoomId || '',
+      String(state.groundEffects?.length || 0)
+    ];
+
+    // Hash player positions and key stats (most frequent changes)
+    if (state.players) {
+      for (const player of state.players) {
+        parts.push(
+          player.id,
+          // Round positions to avoid micro-movement hash changes
+          String(Math.round(player.position.x)),
+          String(Math.round(player.position.y)),
+          String(Math.round(player.stats.health)),
+          String(Math.round(player.stats.mana)),
+          String(player.isAlive),
+          player.targetId || '',
+          // Include gold, level, xp, abilities for vendor purchase detection
+          String(player.gold),
+          String(player.level),
+          String(player.xp),
+          String(player.abilities?.length || 0),
+          String(player.backpack?.length || 0)
+        );
+      }
+    }
+
+    // Hash enemy states in current room only (optimization)
+    const currentRoom = state.dungeon?.rooms?.find(r => r.id === state.dungeon.currentRoomId);
+    if (currentRoom?.enemies) {
+      for (const enemy of currentRoom.enemies) {
+        parts.push(
+          enemy.id,
+          String(Math.round(enemy.position.x)),
+          String(Math.round(enemy.position.y)),
+          String(Math.round(enemy.stats.health)),
+          String(enemy.isAlive)
+        );
+      }
+    }
+
+    return parts.join('|');
   }
 }
 

@@ -16,9 +16,11 @@ import {
   resetFloorPurchases,
 } from './crypto/cryptoHandler.js';
 import { initializeSigner } from './crypto/attestation.js';
+import { stateTracker } from './utils/stateDelta.js';
 
 interface ClientConnection {
   ws: WebSocket;
+  clientId: string;  // Unique ID for state tracking
   playerId: string | null;
   runId: string | null;
 }
@@ -67,8 +69,12 @@ export class GameWebSocketServer {
   private handleConnection(ws: WebSocket): void {
     console.log('Client connected');
 
+    // Generate unique client ID for state tracking
+    const clientId = `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
     const client: ClientConnection = {
       ws,
+      clientId,
       playerId: null,
       runId: null
     };
@@ -95,6 +101,8 @@ export class GameWebSocketServer {
           cleanupCryptoState(client.runId);
         }
       }
+      // Clean up state tracking for this client
+      stateTracker.removeClient(client.clientId);
       this.clients.delete(ws);
     });
 
@@ -178,15 +186,21 @@ export class GameWebSocketServer {
           // Reset crypto purchases for new floor
           resetFloorPurchases(client.runId);
 
+          // Invalidate state cache for all clients in this run
+          // This forces a full state update after floor change
+          for (const [, c] of this.clients) {
+            if (c.runId === client.runId) {
+              stateTracker.invalidateClient(c.clientId);
+            }
+          }
+
           this.broadcastToRun(client.runId, {
             type: 'FLOOR_COMPLETE',
             floor: state.floor
           });
 
-          this.broadcastToRun(client.runId, {
-            type: 'STATE_UPDATE',
-            state
-          });
+          // Send full state update (cache was just invalidated)
+          this.broadcastStateToRun(client.runId, state);
         }
         break;
       }
@@ -338,11 +352,9 @@ export class GameWebSocketServer {
       const updates = gameStateManager.update();
 
       for (const [runId, { state, events, tauntEvents, collectedItems }] of updates) {
-        // Broadcast state update
-        this.broadcastToRun(runId, {
-          type: 'STATE_UPDATE',
-          state
-        });
+        // Broadcast state update only if something changed (per-client tracking)
+        // This strips RunTracking and only sends relevant rooms
+        this.broadcastStateToRun(runId, state);
 
         // Broadcast combat events
         for (const event of events) {
@@ -380,6 +392,28 @@ export class GameWebSocketServer {
         }
       }
     }, tickRate);
+  }
+
+  /**
+   * Broadcast state to run with delta optimization.
+   * Only sends update if something meaningful changed for each client.
+   * Strips server-only data (RunTracking) and filters to relevant rooms.
+   */
+  private broadcastStateToRun(runId: string, state: import('@dungeon-link/shared').RunState): void {
+    for (const [ws, client] of this.clients) {
+      if (client.runId === runId) {
+        // Prepare client-optimized state (strips tracking, filters rooms)
+        // Returns null if nothing changed since last update
+        const clientState = stateTracker.prepareClientState(client.clientId, state);
+
+        if (clientState !== null) {
+          this.send(ws, {
+            type: 'STATE_UPDATE',
+            state: clientState as import('@dungeon-link/shared').RunState
+          });
+        }
+      }
+    }
   }
 
   private send(ws: WebSocket, message: ServerMessage): void {
