@@ -10,8 +10,9 @@
 2. [Root Cause Analysis](#root-cause-analysis)
 3. [Symptoms & Diagnosis](#symptoms--diagnosis)
 4. [The Solution](#the-solution)
-5. [Prevention Guidelines](#prevention-guidelines)
-6. [Performance Benchmarks](#performance-benchmarks)
+5. [Delta State Implementation Details](#delta-state-implementation-details)
+6. [Prevention Guidelines](#prevention-guidelines)
+7. [Performance Benchmarks](#performance-benchmarks)
 
 ---
 
@@ -215,6 +216,137 @@ if (!hasSignificantChanges(previousState, currentState)) {
 
 ---
 
+## Delta State Implementation Details
+
+### Two-Phase Synchronization
+
+The delta system uses a two-phase approach:
+
+1. **Initial Full Sync** - First update sends complete `STATE_UPDATE` (~10KB)
+2. **Delta Updates** - Subsequent updates send only `DELTA_UPDATE` (~500-1000 bytes)
+
+```typescript
+// server/src/WebSocketServer.ts
+if (stateTracker.needsFullSync(client.clientId)) {
+  // First update: full state
+  send({ type: 'STATE_UPDATE', state: clientState });
+  stateTracker.markFullSyncSent(client.clientId, state);
+} else {
+  // Subsequent: delta only
+  const delta = stateTracker.generateDeltaState(state, client.clientId);
+  send({ type: 'DELTA_UPDATE', delta });
+}
+```
+
+### DeltaState Structure
+
+The delta contains only dynamic data that changes during gameplay:
+
+```typescript
+interface DeltaState {
+  players: DeltaPlayer[];     // Position, health, mana, buffs, cooldowns
+  pets: DeltaPet[];           // Position, health, target
+  enemies: DeltaEnemy[];      // Position, health, debuffs, boss flags
+  newEnemies?: NewEnemy[];    // FULL data for newly spawned enemies
+  rooms: DeltaRoom[];         // Cleared status only
+  chests: DeltaChest[];       // Open status only
+  groundEffects: GroundEffect[];
+  inCombat: boolean;
+  currentRoomId: string;
+  pendingLoot: LootDrop[];
+}
+```
+
+### Handling Newly Spawned Enemies
+
+> **Bug Fix (February 2026)**: Boss-summoned skeletons were invisible because delta updates only contain dynamic data, not the full enemy definition needed to create sprites.
+
+When enemies are spawned mid-game (boss summons, ambush triggers), the client needs full enemy data to create sprites. The server tracks which enemy IDs each client knows about:
+
+```typescript
+// server/src/utils/stateDelta.ts
+class StateTracker {
+  // Track enemy IDs per client
+  private clientEnemyIds: Map<string, Set<string>> = new Map();
+
+  markFullSyncSent(clientId: string, state?: RunState): void {
+    // Record initial enemy IDs
+    if (state) {
+      const enemyIds = this.extractAllEnemyIds(state);
+      this.clientEnemyIds.set(clientId, enemyIds);
+    }
+  }
+
+  generateDeltaState(state: RunState, clientId?: string): DeltaState {
+    // Detect enemies client doesn't know about
+    const newEnemies = this.detectNewEnemies(state, clientId);
+
+    return {
+      // ... other delta fields
+      newEnemies: newEnemies.length > 0 ? newEnemies : undefined,
+    };
+  }
+
+  private detectNewEnemies(state: RunState, clientId: string): NewEnemy[] {
+    const knownIds = this.clientEnemyIds.get(clientId);
+    const newEnemies: NewEnemy[] = [];
+
+    for (const room of state.dungeon.rooms) {
+      for (const enemy of room.enemies) {
+        if (!knownIds.has(enemy.id)) {
+          // Include FULL enemy data
+          newEnemies.push({ roomId: room.id, enemy });
+          knownIds.add(enemy.id);  // Track for future
+        }
+      }
+    }
+    return newEnemies;
+  }
+}
+```
+
+The client adds new enemies to its cached state before processing the delta:
+
+```typescript
+// client/src/network/WebSocketClient.ts
+private applyDeltaUpdate(delta: DeltaState): void {
+  // FIRST: Add newly spawned enemies
+  if (delta.newEnemies) {
+    for (const newEnemy of delta.newEnemies) {
+      const room = this.currentState.dungeon.rooms.find(r => r.id === newEnemy.roomId);
+      if (room && !room.enemies.find(e => e.id === newEnemy.enemy.id)) {
+        room.enemies.push(newEnemy.enemy);  // Now sprite can be created
+      }
+    }
+  }
+
+  // THEN: Update existing entities with delta data
+  // ...
+}
+```
+
+### State Invalidation
+
+Full sync is triggered again when:
+- Client first connects
+- Player advances to a new floor
+- Client reconnects after disconnect
+
+```typescript
+// Force full sync after floor change
+stateTracker.invalidateClient(client.clientId);
+```
+
+### Payload Size Comparison
+
+| Update Type | Size | Content |
+|-------------|------|---------|
+| STATE_UPDATE (initial) | ~10KB | Full dungeon, all rooms, all entities |
+| DELTA_UPDATE (normal) | ~500-1000 bytes | Positions, health, cooldowns |
+| DELTA_UPDATE (with spawn) | ~1-2KB | Above + full enemy data for new spawns |
+
+---
+
 ## Prevention Guidelines
 
 ### DO:
@@ -315,11 +447,11 @@ console.log(`State processing: ${performance.now() - start}ms`);
 
 ## Related Files
 
-- `server/src/WebSocketServer.ts` - Message broadcasting
+- `server/src/WebSocketServer.ts` - Message broadcasting, delta/full sync logic
 - `server/src/game/GameState.ts` - State computation
-- `server/src/utils/stateDelta.ts` - Delta computation (NEW)
-- `client/src/network/WebSocketClient.ts` - Message handling
-- `shared/types.ts` - State interfaces
+- `server/src/utils/stateDelta.ts` - Delta computation, state hashing, enemy tracking
+- `client/src/network/WebSocketClient.ts` - Message handling, delta merging
+- `shared/types.ts` - State interfaces (`DeltaState`, `NewEnemy`, etc.)
 - `shared/constants.ts` - Tick rate configuration
 
 ---
@@ -333,6 +465,8 @@ console.log(`State processing: ${performance.now() - start}ms`);
 5. **Performance profile**: 64% scripting time, polygon triangulation
 6. **Root cause**: Full state serialization every 50ms
 7. **Fix implemented**: Delta updates, deduplication, payload reduction
+8. **Follow-up bug**: Boss-summoned skeletons invisible (delta missing full enemy data)
+9. **Follow-up fix**: Added `newEnemies` field to track spawned entities
 
 ---
 
