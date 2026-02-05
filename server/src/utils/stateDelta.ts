@@ -14,7 +14,8 @@
 import { RunState, Player, Enemy, Room, GroundEffect, Position, Pet } from '@dungeon-link/shared';
 
 // Threshold for position changes (in pixels) - below this, consider unchanged
-const POSITION_THRESHOLD = 0.5;
+// Using 1 pixel to match hashPosition rounding for smooth patrol movement
+const POSITION_THRESHOLD = 1.0;
 
 // Threshold for considering stats unchanged
 const STAT_THRESHOLD = 0.01;
@@ -208,12 +209,17 @@ export class StateTracker {
   }
 
   /**
-   * Hash a position with threshold rounding to avoid micro-movement updates
+   * Hash a position for change detection.
+   *
+   * NOTE: We use integer rounding (1 pixel precision) instead of sub-pixel
+   * to avoid patrol enemies appearing to teleport. The 0.5 pixel threshold
+   * caused updates to be batched, making patrols jump instead of move smoothly.
    */
   private hashPosition(pos: Position): string {
-    // Round to nearest 0.5 pixel to avoid unnecessary updates for micro-movements
-    const x = Math.round(pos.x * 2) / 2;
-    const y = Math.round(pos.y * 2) / 2;
+    // Round to nearest integer pixel - provides enough precision for smooth movement
+    // while still avoiding updates for sub-pixel jitter
+    const x = Math.round(pos.x);
+    const y = Math.round(pos.y);
     return `${x},${y}`;
   }
 
