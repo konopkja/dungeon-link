@@ -1,4 +1,4 @@
-import { ClientMessage, ServerMessage, RunState, Player, CombatEvent, LootDrop, ClassName, SaveData } from '@dungeon-link/shared';
+import { ClientMessage, ServerMessage, RunState, Player, CombatEvent, LootDrop, ClassName, SaveData, DeltaState } from '@dungeon-link/shared';
 import { WS_CONFIG } from '@dungeon-link/shared';
 import { WS_URL } from '../config';
 
@@ -133,8 +133,8 @@ export class WebSocketClient {
         break;
 
       case 'STATE_UPDATE':
+        // Full state update - replace entire state (used for initial sync and floor changes)
         // Deduplicate state updates to prevent unnecessary processing
-        // Server should already filter unchanged states, but this is a safety net
         const stateHash = this.computeStateHash(message.state);
         if (stateHash === this.lastStateHash) {
           this.duplicateCount++;
@@ -146,6 +146,19 @@ export class WebSocketClient {
         this.lastStateHash = stateHash;
         this.duplicateCount = 0;
         this.currentState = message.state;
+        if (DEBUG_LOGGING) {
+          console.log(`[WS] Full state update: ${JSON.stringify(message.state).length} bytes`);
+        }
+        break;
+
+      case 'DELTA_UPDATE':
+        // Delta update - merge with cached state (much smaller payload)
+        if (this.currentState) {
+          this.applyDeltaUpdate(message.delta);
+          if (DEBUG_LOGGING) {
+            console.log(`[WS] Delta update: ${JSON.stringify(message.delta).length} bytes`);
+          }
+        }
         break;
 
       case 'PLAYER_JOINED':
@@ -524,6 +537,97 @@ export class WebSocketClient {
     this.messageHandlers.clear();
     this.connectHandlers.clear();
     this.disconnectHandlers.clear();
+  }
+
+  /**
+   * Apply delta update to cached state.
+   * Merges dynamic data from delta with static structure from initial sync.
+   * This allows us to receive ~500-1000 byte updates instead of ~10KB.
+   */
+  private applyDeltaUpdate(delta: DeltaState): void {
+    if (!this.currentState) return;
+
+    // Update players
+    for (const deltaPlayer of delta.players) {
+      const player = this.currentState.players.find(p => p.id === deltaPlayer.id);
+      if (player) {
+        player.position = deltaPlayer.position;
+        player.stats.health = deltaPlayer.health;
+        player.stats.maxHealth = deltaPlayer.maxHealth;
+        player.stats.mana = deltaPlayer.mana;
+        player.stats.maxMana = deltaPlayer.maxMana;
+        player.isAlive = deltaPlayer.isAlive;
+        player.targetId = deltaPlayer.targetId;
+        player.gold = deltaPlayer.gold;
+        player.xp = deltaPlayer.xp;
+        player.level = deltaPlayer.level;
+        player.buffs = deltaPlayer.buffs;
+        // Update ability cooldowns
+        for (const cd of deltaPlayer.abilityCooldowns) {
+          const ability = player.abilities.find(a => a.abilityId === cd.abilityId);
+          if (ability) {
+            ability.currentCooldown = cd.currentCooldown;
+          }
+        }
+      }
+    }
+
+    // Update pets
+    for (const deltaPet of delta.pets) {
+      const pet = this.currentState.pets.find(p => p.id === deltaPet.id);
+      if (pet) {
+        pet.position = deltaPet.position;
+        pet.stats.health = deltaPet.health;
+        pet.stats.maxHealth = deltaPet.maxHealth;
+        pet.isAlive = deltaPet.isAlive;
+        pet.targetId = deltaPet.targetId;
+      }
+    }
+
+    // Update enemies
+    for (const deltaEnemy of delta.enemies) {
+      const room = this.currentState.dungeon.rooms.find(r => r.id === deltaEnemy.roomId);
+      if (room) {
+        const enemy = room.enemies.find(e => e.id === deltaEnemy.id);
+        if (enemy) {
+          enemy.position = deltaEnemy.position;
+          enemy.stats.health = deltaEnemy.health;
+          enemy.stats.maxHealth = deltaEnemy.maxHealth;
+          enemy.isAlive = deltaEnemy.isAlive;
+          enemy.targetId = deltaEnemy.targetId;
+          enemy.isHidden = deltaEnemy.isHidden;
+          enemy.debuffs = deltaEnemy.debuffs;
+          enemy.isEnraged = deltaEnemy.isEnraged;
+          enemy.isInvulnerable = deltaEnemy.isInvulnerable;
+          enemy.isRegenerating = deltaEnemy.isRegenerating;
+        }
+      }
+    }
+
+    // Update room cleared status
+    for (const deltaRoom of delta.rooms) {
+      const room = this.currentState.dungeon.rooms.find(r => r.id === deltaRoom.id);
+      if (room) {
+        room.cleared = deltaRoom.cleared;
+      }
+    }
+
+    // Update chest status
+    for (const deltaChest of delta.chests) {
+      for (const room of this.currentState.dungeon.rooms) {
+        const chest = room.chests?.find(c => c.id === deltaChest.id);
+        if (chest) {
+          chest.isOpen = deltaChest.isOpen;
+          break;
+        }
+      }
+    }
+
+    // Update other dynamic fields
+    this.currentState.groundEffects = delta.groundEffects;
+    this.currentState.inCombat = delta.inCombat;
+    this.currentState.dungeon.currentRoomId = delta.currentRoomId;
+    this.currentState.pendingLoot = delta.pendingLoot;
   }
 
   /**

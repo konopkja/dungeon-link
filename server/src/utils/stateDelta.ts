@@ -5,13 +5,13 @@
  * See docs/PERFORMANCE-STATE-UPDATES.md for full context on why this exists.
  *
  * Key optimizations:
- * 1. Only send changed player positions/stats
- * 2. Only send enemies in current + adjacent rooms
+ * 1. Initial sync sends full state (~10KB)
+ * 2. Tick updates send only delta state (~500-1000 bytes)
  * 3. Never send RunTracking (server-only data)
  * 4. Skip updates when nothing meaningful changed
  */
 
-import { RunState, Player, Enemy, Room, GroundEffect, Position, Pet } from '@dungeon-link/shared';
+import { RunState, Player, Enemy, Room, GroundEffect, Position, Pet, DeltaState, DeltaPlayer, DeltaPet, DeltaEnemy, DeltaRoom, DeltaChest } from '@dungeon-link/shared';
 
 // Threshold for position changes (in pixels) - below this, consider unchanged
 // Using 1 pixel to match hashPosition rounding for smooth patrol movement
@@ -60,6 +60,9 @@ export class StateTracker {
     hash: string;
     timestamp: number;
   }> = new Map();
+
+  // Track which clients have received initial full sync
+  private clientsWithFullSync: Set<string> = new Set();
 
   /**
    * Prepare state for client broadcast.
@@ -233,17 +236,123 @@ export class StateTracker {
   }
 
   /**
+   * Check if client needs a full sync (first update or after invalidation)
+   */
+  needsFullSync(clientId: string): boolean {
+    return !this.clientsWithFullSync.has(clientId);
+  }
+
+  /**
+   * Mark client as having received full sync
+   */
+  markFullSyncSent(clientId: string): void {
+    this.clientsWithFullSync.add(clientId);
+  }
+
+  /**
+   * Generate delta state containing only dynamic data
+   * This reduces payload from ~10KB to ~500-1000 bytes
+   */
+  generateDeltaState(state: RunState): DeltaState | null {
+    const delta: DeltaState = {
+      players: state.players.map(p => this.extractDeltaPlayer(p)),
+      pets: state.pets.map(pet => this.extractDeltaPet(pet)),
+      enemies: this.extractDeltaEnemies(state.dungeon.rooms),
+      rooms: state.dungeon.rooms.map(r => ({ id: r.id, cleared: r.cleared })),
+      chests: this.extractDeltaChests(state.dungeon.rooms),
+      groundEffects: state.groundEffects,
+      inCombat: state.inCombat,
+      currentRoomId: state.dungeon.currentRoomId,
+      pendingLoot: state.pendingLoot
+    };
+
+    return delta;
+  }
+
+  private extractDeltaPlayer(player: Player): DeltaPlayer {
+    return {
+      id: player.id,
+      position: player.position,
+      health: player.stats.health,
+      maxHealth: player.stats.maxHealth,
+      mana: player.stats.mana,
+      maxMana: player.stats.maxMana,
+      isAlive: player.isAlive,
+      targetId: player.targetId,
+      gold: player.gold,
+      xp: player.xp,
+      level: player.level,
+      buffs: player.buffs,
+      abilityCooldowns: player.abilities.map(a => ({
+        abilityId: a.abilityId,
+        currentCooldown: a.currentCooldown
+      }))
+    };
+  }
+
+  private extractDeltaPet(pet: Pet): DeltaPet {
+    return {
+      id: pet.id,
+      position: pet.position,
+      health: pet.stats.health,
+      maxHealth: pet.stats.maxHealth,
+      isAlive: pet.isAlive,
+      targetId: pet.targetId
+    };
+  }
+
+  private extractDeltaEnemies(rooms: Room[]): DeltaEnemy[] {
+    const enemies: DeltaEnemy[] = [];
+    for (const room of rooms) {
+      for (const enemy of room.enemies) {
+        enemies.push({
+          id: enemy.id,
+          roomId: room.id,
+          position: enemy.position,
+          health: enemy.stats.health,
+          maxHealth: enemy.stats.maxHealth,
+          isAlive: enemy.isAlive,
+          targetId: enemy.targetId,
+          isHidden: enemy.isHidden,
+          debuffs: enemy.debuffs,
+          isEnraged: enemy.isEnraged,
+          isInvulnerable: enemy.isInvulnerable,
+          isRegenerating: enemy.isRegenerating
+        });
+      }
+    }
+    return enemies;
+  }
+
+  private extractDeltaChests(rooms: Room[]): DeltaChest[] {
+    const chests: DeltaChest[] = [];
+    for (const room of rooms) {
+      if (room.chests) {
+        for (const chest of room.chests) {
+          chests.push({
+            id: chest.id,
+            isOpen: chest.isOpen
+          });
+        }
+      }
+    }
+    return chests;
+  }
+
+  /**
    * Clean up tracking for a disconnected client
    */
   removeClient(clientId: string): void {
     this.lastStates.delete(clientId);
+    this.clientsWithFullSync.delete(clientId);
   }
 
   /**
-   * Force next update to be sent (e.g., after floor change)
+   * Force next update to be a full sync (e.g., after floor change)
    */
   invalidateClient(clientId: string): void {
     this.lastStates.delete(clientId);
+    this.clientsWithFullSync.delete(clientId);
   }
 
   /**

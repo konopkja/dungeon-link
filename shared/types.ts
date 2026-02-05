@@ -646,7 +646,90 @@ export type ServerMessage =
   | { type: 'CLAIM_ATTESTATION'; signature: string; accountId: string; ethAmountWei: string; walletAddress: string }
   | { type: 'CLAIM_NOT_ELIGIBLE'; reason: string }
   | { type: 'POOL_STATUS'; rewardPoolWei: string; hasPoolFunds: boolean }
-  | { type: 'CRYPTO_STATE_UPDATE'; cryptoState: CryptoState };
+  | { type: 'CRYPTO_STATE_UPDATE'; cryptoState: CryptoState }
+  | { type: 'DELTA_UPDATE'; delta: DeltaState };
+
+// ============================================
+// DELTA STATE (for bandwidth optimization)
+// ============================================
+
+/**
+ * Lightweight state update containing only dynamic data that changes during gameplay.
+ * Static dungeon structure (room geometry, vendors, etc.) is cached from initial sync.
+ * This reduces STATE_UPDATE from ~10KB to ~500-1000 bytes.
+ */
+export interface DeltaState {
+  // Player dynamic data
+  players: DeltaPlayer[];
+  // Pet dynamic data
+  pets: DeltaPet[];
+  // Enemy dynamic data per room
+  enemies: DeltaEnemy[];
+  // Room status changes
+  rooms: DeltaRoom[];
+  // Chest status changes
+  chests: DeltaChest[];
+  // Ground effects (always sent in full - they're transient)
+  groundEffects: GroundEffect[];
+  // Combat status
+  inCombat: boolean;
+  // Current room
+  currentRoomId: string;
+  // Pending loot
+  pendingLoot: LootDrop[];
+}
+
+export interface DeltaPlayer {
+  id: string;
+  position: Position;
+  health: number;
+  maxHealth: number;
+  mana: number;
+  maxMana: number;
+  isAlive: boolean;
+  targetId: string | null;
+  gold: number;
+  xp: number;
+  level: number;
+  buffs: Buff[];
+  // Ability cooldowns only (not full ability data)
+  abilityCooldowns: { abilityId: string; currentCooldown: number }[];
+}
+
+export interface DeltaPet {
+  id: string;
+  position: Position;
+  health: number;
+  maxHealth: number;
+  isAlive: boolean;
+  targetId: string | null;
+}
+
+export interface DeltaEnemy {
+  id: string;
+  roomId: string;
+  position: Position;
+  health: number;
+  maxHealth: number;
+  isAlive: boolean;
+  targetId: string | null;
+  isHidden?: boolean;
+  debuffs: DoTEffect[];
+  // Boss phase flags
+  isEnraged?: boolean;
+  isInvulnerable?: boolean;
+  isRegenerating?: boolean;
+}
+
+export interface DeltaRoom {
+  id: string;
+  cleared: boolean;
+}
+
+export interface DeltaChest {
+  id: string;
+  isOpen: boolean;
+}
 
 export interface CombatEvent {
   sourceId: string;

@@ -405,25 +405,67 @@ export class GameWebSocketServer {
     }, tickRate);
   }
 
+  // Payload size tracking for monitoring (log every 100 updates to avoid spam)
+  private updateCount = 0;
+  private totalFullSyncBytes = 0;
+  private totalDeltaBytes = 0;
+  private fullSyncCount = 0;
+  private deltaCount = 0;
+
   /**
    * Broadcast state to run with delta optimization.
-   * Only sends update if something meaningful changed for each client.
-   * Strips server-only data (RunTracking) and filters to relevant rooms.
+   * - First update sends full state (STATE_UPDATE) for initial sync
+   * - Subsequent updates send only delta (DELTA_UPDATE) for bandwidth savings
+   * - Reduces payload from ~10KB to ~500-1000 bytes after initial sync
    */
   private broadcastStateToRun(runId: string, state: import('@dungeon-link/shared').RunState): void {
     for (const [ws, client] of this.clients) {
       if (client.runId === runId) {
-        // Prepare client-optimized state (strips tracking, filters rooms)
-        // Returns null if nothing changed since last update
-        const clientState = stateTracker.prepareClientState(client.clientId, state);
+        // Check if client needs full sync (first update or after floor change)
+        if (stateTracker.needsFullSync(client.clientId)) {
+          // Send full state for initial sync
+          const clientState = stateTracker.prepareClientState(client.clientId, state, true);
+          if (clientState !== null) {
+            const payload = JSON.stringify({ type: 'STATE_UPDATE', state: clientState });
+            this.send(ws, {
+              type: 'STATE_UPDATE',
+              state: clientState as import('@dungeon-link/shared').RunState
+            });
+            stateTracker.markFullSyncSent(client.clientId);
 
-        if (clientState !== null) {
-          this.send(ws, {
-            type: 'STATE_UPDATE',
-            state: clientState as import('@dungeon-link/shared').RunState
-          });
+            // Track payload sizes
+            this.totalFullSyncBytes += payload.length;
+            this.fullSyncCount++;
+          }
+        } else {
+          // Send delta update (much smaller payload)
+          const clientState = stateTracker.prepareClientState(client.clientId, state);
+
+          // Only send if state changed
+          if (clientState !== null) {
+            const delta = stateTracker.generateDeltaState(state);
+            if (delta !== null) {
+              const payload = JSON.stringify({ type: 'DELTA_UPDATE', delta });
+              this.send(ws, {
+                type: 'DELTA_UPDATE',
+                delta
+              });
+
+              // Track payload sizes
+              this.totalDeltaBytes += payload.length;
+              this.deltaCount++;
+            }
+          }
         }
       }
+    }
+
+    // Log stats every 100 updates
+    this.updateCount++;
+    if (this.updateCount % 100 === 0) {
+      const avgFullSync = this.fullSyncCount > 0 ? Math.round(this.totalFullSyncBytes / this.fullSyncCount) : 0;
+      const avgDelta = this.deltaCount > 0 ? Math.round(this.totalDeltaBytes / this.deltaCount) : 0;
+      console.log(`[WS Stats] Full syncs: ${this.fullSyncCount} (avg ${avgFullSync} bytes), Deltas: ${this.deltaCount} (avg ${avgDelta} bytes)`);
     }
   }
 
