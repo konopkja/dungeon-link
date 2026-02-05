@@ -705,7 +705,10 @@ export interface DeltaPlayer {
   targetId: string | null;
   gold: number;
   xp: number;
+  xpToNextLevel: number;
   level: number;
+  rerollTokens: number;
+  baseStats: Stats;
   buffs: Buff[];
   // Full abilities array (includes new abilities learned from vendors)
   abilities: PlayerAbility[];
@@ -745,6 +748,8 @@ export interface DeltaRoom {
   cleared: boolean;
   // Ground items dropped by enemies (loot)
   groundItems?: GroundItem[];
+  // Trap states (isActive changes during gameplay)
+  traps?: Trap[];
 }
 
 export interface DeltaChest {

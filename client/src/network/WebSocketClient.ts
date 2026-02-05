@@ -577,7 +577,10 @@ export class WebSocketClient {
         player.targetId = deltaPlayer.targetId;
         player.gold = deltaPlayer.gold;
         player.xp = deltaPlayer.xp;
+        player.xpToNextLevel = deltaPlayer.xpToNextLevel;
         player.level = deltaPlayer.level;
+        player.rerollTokens = deltaPlayer.rerollTokens;
+        player.baseStats = deltaPlayer.baseStats;
         player.buffs = deltaPlayer.buffs;
         // Update abilities (includes new abilities learned from vendors)
         player.abilities = deltaPlayer.abilities;
@@ -620,12 +623,13 @@ export class WebSocketClient {
       }
     }
 
-    // Update room cleared status and ground items
+    // Update room cleared status, ground items, and traps
     for (const deltaRoom of delta.rooms) {
       const room = this.currentState.dungeon.rooms.find(r => r.id === deltaRoom.id);
       if (room) {
         room.cleared = deltaRoom.cleared;
         room.groundItems = deltaRoom.groundItems;
+        room.traps = deltaRoom.traps;
       }
     }
 

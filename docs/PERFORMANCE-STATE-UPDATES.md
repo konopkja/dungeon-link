@@ -244,18 +244,66 @@ The delta contains only dynamic data that changes during gameplay:
 
 ```typescript
 interface DeltaState {
-  players: DeltaPlayer[];     // Position, health, mana, buffs, cooldowns
+  players: DeltaPlayer[];     // All dynamic player data (see below)
   pets: DeltaPet[];           // Position, health, target
   enemies: DeltaEnemy[];      // Position, health, debuffs, boss flags
   newEnemies?: NewEnemy[];    // FULL data for newly spawned enemies
-  rooms: DeltaRoom[];         // Cleared status only
+  rooms: DeltaRoom[];         // Cleared, groundItems, traps
   chests: DeltaChest[];       // Open status only
   groundEffects: GroundEffect[];
   inCombat: boolean;
   currentRoomId: string;
+  bossDefeated: boolean;      // Triggers floor advance prompt
   pendingLoot: LootDrop[];
 }
+
+interface DeltaPlayer {
+  id: string;
+  position: Position;
+  health: number;
+  maxHealth: number;
+  mana: number;
+  maxMana: number;
+  isAlive: boolean;
+  targetId: string | null;
+  gold: number;
+  xp: number;
+  xpToNextLevel: number;      // For XP bar display
+  level: number;
+  rerollTokens: number;       // Token count
+  baseStats: Stats;           // Stats after level up
+  buffs: Buff[];
+  abilities: PlayerAbility[]; // Full array (new abilities from vendor)
+  backpack: (Item | Potion)[]; // Inventory items
+  equipment: Equipment;       // Equipped gear
+}
+
+interface DeltaRoom {
+  id: string;
+  cleared: boolean;
+  groundItems?: GroundItem[]; // Loot drops
+  traps?: Trap[];             // Trap states (isActive)
+}
 ```
+
+### Critical: What Must Be In Delta
+
+Any data that changes during gameplay MUST be in the delta, or the client will show stale data:
+
+| Data | When It Changes | Delta Field |
+|------|-----------------|-------------|
+| Player position/health | Movement, combat | `DeltaPlayer.*` |
+| Player inventory | Loot pickup | `DeltaPlayer.backpack` |
+| Player abilities | Vendor purchase | `DeltaPlayer.abilities` |
+| Player XP/level | Combat, level up | `DeltaPlayer.xp/level/xpToNextLevel` |
+| Player equipment | Vendor swap | `DeltaPlayer.equipment` |
+| Enemy position/health | Combat, patrol | `DeltaEnemy.*` |
+| New enemies | Boss summon, ambush | `newEnemies` |
+| Room cleared | All enemies dead | `DeltaRoom.cleared` |
+| Ground items | Loot drops | `DeltaRoom.groundItems` |
+| Trap state | Trap activation | `DeltaRoom.traps` |
+| Boss defeated | Boss killed | `bossDefeated` |
+| Chest opened | Player interaction | `DeltaChest.isOpen` |
 
 ### Handling Newly Spawned Enemies
 
