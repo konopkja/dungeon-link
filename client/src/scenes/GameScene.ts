@@ -5467,19 +5467,39 @@ export class GameScene extends Phaser.Scene {
       this.targetTypeText.setText(typeDesc);
     }
 
-    // Update boss mechanics/abilities text
+    // Update mechanics/abilities text for bosses, elites, and regular enemies
     if (this.targetMechanicsText) {
+      const abilityLines: string[] = [];
+
+      // Boss mechanics (health triggers, intervals)
       if (targetEnemy.isBoss && targetEnemy.bossMechanics && targetEnemy.bossMechanics.length > 0) {
-        const mechanicsLines = targetEnemy.bossMechanics.map(m => {
+        for (const m of targetEnemy.bossMechanics) {
           let trigger = '';
           if (m.triggerHealthPercent !== undefined) {
             trigger = ` (at ${m.triggerHealthPercent}% HP)`;
           } else if (m.intervalSeconds !== undefined) {
             trigger = ` (every ${m.intervalSeconds}s)`;
           }
-          return `• ${m.name}${trigger}`;
-        });
-        this.targetMechanicsText.setText(mechanicsLines.join('\n'));
+          abilityLines.push(`• ${m.name}${trigger}`);
+        }
+      }
+
+      // Elite special ability - void zone attack
+      if (targetEnemy.isElite && !targetEnemy.isBoss) {
+        abilityLines.push('• Void Zone - Expanding AoE (6s cd)');
+        // Melee elites also have charge
+        if (targetEnemy.type === 'melee') {
+          abilityLines.push('• Charge - Rushes at distant targets');
+        }
+      }
+
+      // Regular melee enemies (including skeletons) have charge ability
+      if (!targetEnemy.isBoss && !targetEnemy.isElite && targetEnemy.type === 'melee') {
+        abilityLines.push('• Charge - Rushes at distant targets');
+      }
+
+      if (abilityLines.length > 0) {
+        this.targetMechanicsText.setText(abilityLines.join('\n'));
         this.targetMechanicsText.setVisible(true);
       } else {
         this.targetMechanicsText.setText('');
@@ -6111,11 +6131,11 @@ export class GameScene extends Phaser.Scene {
   private playBossEnrageEffect(bossId: string, pos: { x: number; y: number }): void {
     const bossSprite = this.enemySprites.get(bossId);
     if (bossSprite) {
-      // Scale up the boss slightly
+      // Scale up the boss when enraged
       this.tweens.add({
         targets: bossSprite,
-        scaleX: bossSprite.scaleX * 1.15,
-        scaleY: bossSprite.scaleY * 1.15,
+        scaleX: bossSprite.scaleX * 1.25,
+        scaleY: bossSprite.scaleY * 1.25,
         duration: 500,
         ease: 'Bounce.easeOut'
       });
