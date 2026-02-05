@@ -579,13 +579,8 @@ export class WebSocketClient {
         player.xp = deltaPlayer.xp;
         player.level = deltaPlayer.level;
         player.buffs = deltaPlayer.buffs;
-        // Update ability cooldowns
-        for (const cd of deltaPlayer.abilityCooldowns) {
-          const ability = player.abilities.find(a => a.abilityId === cd.abilityId);
-          if (ability) {
-            ability.currentCooldown = cd.currentCooldown;
-          }
-        }
+        // Update abilities (includes new abilities learned from vendors)
+        player.abilities = deltaPlayer.abilities;
         // Update inventory (items and potions picked up)
         player.backpack = deltaPlayer.backpack;
         // Update equipment (from vendor swaps, etc.)

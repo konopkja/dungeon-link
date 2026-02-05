@@ -707,8 +707,8 @@ export interface DeltaPlayer {
   xp: number;
   level: number;
   buffs: Buff[];
-  // Ability cooldowns only (not full ability data)
-  abilityCooldowns: { abilityId: string; currentCooldown: number }[];
+  // Full abilities array (includes new abilities learned from vendors)
+  abilities: PlayerAbility[];
   // Inventory - items and potions picked up during gameplay
   backpack: (Item | Potion)[];
   // Equipment changes (from vendor swaps, etc.)

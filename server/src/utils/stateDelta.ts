@@ -343,10 +343,7 @@ export class StateTracker {
       xp: player.xp,
       level: player.level,
       buffs: player.buffs,
-      abilityCooldowns: player.abilities.map(a => ({
-        abilityId: a.abilityId,
-        currentCooldown: a.currentCooldown
-      })),
+      abilities: player.abilities,
       backpack: player.backpack,
       equipment: player.equipment
     };
