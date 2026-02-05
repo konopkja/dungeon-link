@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { Player, Enemy, Room, ServerMessage, EnemyType, Potion, PotionType, Pet, GroundEffect, GroundEffectType, AbilityType, VendorService, Vendor, GroundItem, Trap, Chest, TrapType, FloorTheme, FloorThemeModifiers } from '@dungeon-link/shared';
+import { Player, Enemy, Room, ServerMessage, EnemyType, Potion, PotionType, Pet, GroundEffect, GroundEffectType, AbilityType, VendorService, Vendor, GroundItem, Trap, Chest, TrapType, FloorTheme, FloorThemeModifiers, BossPhaseType } from '@dungeon-link/shared';
 import { CLASS_COLORS, SPRITE_CONFIG, ENEMY_TYPE_COLORS, getAbilityById, calculateAbilityDamage, calculateAbilityHeal } from '@dungeon-link/shared';
 import { openCryptoVendor, updatePurchasesRemaining, emitWalletEvent, openVendor, closeVendor, updateVendor, onWalletEvent, initWalletUI } from '../wallet/lazyWallet';
 import { wsClient } from '../network/WebSocketClient';
@@ -5962,6 +5962,9 @@ export class GameScene extends Phaser.Scene {
         this.playSfx('sfxHealSpell');
         this.showPotionEffect(currentPlayer.position.x, currentPlayer.position.y, message.potionType);
       }
+    } else if (message.type === 'BOSS_PHASE_CHANGE') {
+      // Boss phase change visual effects
+      this.handleBossPhaseChange(message.bossId, message.bossName, message.phase, message.mechanicName);
     }
   }
 
@@ -5970,6 +5973,364 @@ export class GameScene extends Phaser.Scene {
       this.sound.play(key, { volume });
     } catch {
       // Sound not loaded or audio context not ready
+    }
+  }
+
+  /**
+   * Handle boss phase change events with visual effects
+   */
+  private handleBossPhaseChange(bossId: string, bossName: string, phase: BossPhaseType, mechanicName: string): void {
+    // Find boss position
+    const state = wsClient.currentState;
+    if (!state) return;
+
+    let bossPos = { x: 0, y: 0 };
+    let bossEnemy: Enemy | null = null;
+
+    for (const room of state.dungeon.rooms) {
+      const enemy = room.enemies.find(e => e.id === bossId);
+      if (enemy) {
+        bossPos = enemy.position;
+        bossEnemy = enemy;
+        break;
+      }
+    }
+
+    if (!bossEnemy) return;
+
+    console.log(`[BOSS PHASE] ${bossName} entered phase: ${mechanicName} (${phase})`);
+
+    // Show announcement banner
+    this.showBossPhaseAnnouncement(bossName, mechanicName, phase);
+
+    // Play phase-specific visual effects
+    switch (phase) {
+      case BossPhaseType.Enrage:
+        this.playBossEnrageEffect(bossId, bossPos);
+        this.playSfx('sfxSpell', 0.5);
+        break;
+
+      case BossPhaseType.Shield:
+        this.playBossShieldEffect(bossId, bossPos);
+        this.playSfx('sfxCast', 0.4);
+        break;
+
+      case BossPhaseType.Summon:
+        this.playBossSummonEffect(bossPos);
+        this.playSfx('sfxSpell', 0.5);
+        break;
+
+      case BossPhaseType.Regenerate:
+        this.playBossHealEffect(bossPos);
+        this.playSfx('sfxHealSpell', 0.4);
+        break;
+
+      case BossPhaseType.Frenzy:
+        this.playBossFrenzyEffect(bossPos);
+        this.playSfx('sfxSpell', 0.6);
+        break;
+    }
+  }
+
+  /**
+   * Show boss phase change announcement banner
+   */
+  private showBossPhaseAnnouncement(bossName: string, mechanicName: string, phase: BossPhaseType): void {
+    const width = this.scale.width;
+    const height = this.scale.height;
+
+    // Color based on phase type
+    const phaseColors: Record<BossPhaseType, number> = {
+      [BossPhaseType.Enrage]: 0xff4444,
+      [BossPhaseType.Shield]: 0x4488ff,
+      [BossPhaseType.Summon]: 0x884488,
+      [BossPhaseType.Regenerate]: 0x44ff44,
+      [BossPhaseType.Frenzy]: 0xff8844
+    };
+    const color = phaseColors[phase] || 0xffffff;
+
+    // Create announcement background
+    const bgHeight = 60;
+    const bg = this.add.rectangle(width / 2, height / 3, width * 0.6, bgHeight, 0x000000, 0.7);
+    bg.setDepth(1000).setScrollFactor(0);
+
+    // Border
+    const border = this.add.rectangle(width / 2, height / 3, width * 0.6, bgHeight);
+    border.setStrokeStyle(2, color);
+    border.setFillStyle(0x000000, 0);
+    border.setDepth(1001).setScrollFactor(0);
+
+    // Boss name text
+    const nameText = this.add.text(width / 2, height / 3 - 12, bossName, {
+      fontSize: '18px',
+      color: '#ffffff',
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(1002).setScrollFactor(0);
+
+    // Mechanic name text
+    const colorHex = '#' + color.toString(16).padStart(6, '0');
+    const mechanicText = this.add.text(width / 2, height / 3 + 12, mechanicName, {
+      fontSize: '16px',
+      color: colorHex,
+      fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(1002).setScrollFactor(0);
+
+    // Animate in
+    bg.setAlpha(0);
+    border.setAlpha(0);
+    nameText.setAlpha(0);
+    mechanicText.setAlpha(0);
+
+    this.tweens.add({
+      targets: [bg, border, nameText, mechanicText],
+      alpha: 1,
+      duration: 200,
+      ease: 'Quad.easeOut'
+    });
+
+    // Animate out after delay
+    this.time.delayedCall(2000, () => {
+      this.tweens.add({
+        targets: [bg, border, nameText, mechanicText],
+        alpha: 0,
+        duration: 400,
+        ease: 'Quad.easeIn',
+        onComplete: () => {
+          bg.destroy();
+          border.destroy();
+          nameText.destroy();
+          mechanicText.destroy();
+        }
+      });
+    });
+  }
+
+  /**
+   * Play enrage visual effect - boss grows slightly and glows red
+   */
+  private playBossEnrageEffect(bossId: string, pos: { x: number; y: number }): void {
+    const bossSprite = this.enemySprites.get(bossId);
+    if (bossSprite) {
+      // Scale up the boss slightly
+      this.tweens.add({
+        targets: bossSprite,
+        scaleX: bossSprite.scaleX * 1.15,
+        scaleY: bossSprite.scaleY * 1.15,
+        duration: 500,
+        ease: 'Bounce.easeOut'
+      });
+
+      // Add red tint
+      bossSprite.setTint(0xff4444);
+    }
+
+    // Expanding red shockwave
+    const graphics = this.add.graphics();
+    graphics.setDepth(50);
+
+    let radius = 20;
+    let alpha = 0.8;
+
+    const animateShockwave = () => {
+      graphics.clear();
+      graphics.lineStyle(4, 0xff4444, alpha);
+      graphics.strokeCircle(pos.x, pos.y, radius);
+
+      radius += 4;
+      alpha -= 0.05;
+
+      if (alpha > 0) {
+        this.time.delayedCall(16, animateShockwave);
+      } else {
+        graphics.destroy();
+      }
+    };
+
+    animateShockwave();
+  }
+
+  /**
+   * Play shield visual effect - blue bubble around boss
+   */
+  private playBossShieldEffect(bossId: string, pos: { x: number; y: number }): void {
+    const bossSprite = this.enemySprites.get(bossId);
+    if (bossSprite) {
+      // Add blue tint for invulnerability
+      bossSprite.setTint(0x4488ff);
+    }
+
+    // Create shield bubble
+    const shield = this.add.graphics();
+    shield.setDepth(45);
+
+    const drawShield = (alpha: number) => {
+      shield.clear();
+      shield.lineStyle(3, 0x4488ff, alpha);
+      shield.fillStyle(0x4488ff, alpha * 0.2);
+      shield.strokeCircle(pos.x, pos.y, 50);
+      shield.fillCircle(pos.x, pos.y, 50);
+    };
+
+    drawShield(0.8);
+
+    // Pulse animation
+    let pulseDirection = -1;
+    let pulseAlpha = 0.8;
+    const pulseInterval = setInterval(() => {
+      pulseAlpha += pulseDirection * 0.02;
+      if (pulseAlpha <= 0.4) pulseDirection = 1;
+      if (pulseAlpha >= 0.8) pulseDirection = -1;
+      drawShield(pulseAlpha);
+    }, 50);
+
+    // Remove shield after 5 seconds
+    this.time.delayedCall(5000, () => {
+      clearInterval(pulseInterval);
+      this.tweens.add({
+        targets: shield,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => shield.destroy()
+      });
+
+      // Remove blue tint
+      if (bossSprite) {
+        bossSprite.clearTint();
+      }
+    });
+  }
+
+  /**
+   * Play summon visual effect - purple portals
+   */
+  private playBossSummonEffect(pos: { x: number; y: number }): void {
+    // Create multiple spawn portals around the boss
+    const count = 3;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const radius = 80;
+      const portalX = pos.x + Math.cos(angle) * radius;
+      const portalY = pos.y + Math.sin(angle) * radius;
+
+      const portal = this.add.graphics();
+      portal.setDepth(40);
+
+      let portalRadius = 0;
+      let alpha = 0;
+
+      const animatePortal = () => {
+        portal.clear();
+        portal.lineStyle(3, 0x884488, alpha);
+        portal.fillStyle(0x442244, alpha * 0.5);
+        portal.strokeCircle(portalX, portalY, portalRadius);
+        portal.fillCircle(portalX, portalY, portalRadius);
+
+        if (portalRadius < 25) {
+          portalRadius += 2;
+          alpha = Math.min(0.8, alpha + 0.1);
+          this.time.delayedCall(30, animatePortal);
+        } else {
+          // Shrink and fade
+          this.time.delayedCall(500, () => {
+            const shrink = () => {
+              portal.clear();
+              portalRadius -= 2;
+              alpha -= 0.08;
+              if (portalRadius > 0 && alpha > 0) {
+                portal.lineStyle(3, 0x884488, alpha);
+                portal.fillStyle(0x442244, alpha * 0.5);
+                portal.strokeCircle(portalX, portalY, portalRadius);
+                portal.fillCircle(portalX, portalY, portalRadius);
+                this.time.delayedCall(30, shrink);
+              } else {
+                portal.destroy();
+              }
+            };
+            shrink();
+          });
+        }
+      };
+
+      this.time.delayedCall(i * 200, animatePortal);
+    }
+  }
+
+  /**
+   * Play heal/regenerate visual effect
+   */
+  private playBossHealEffect(pos: { x: number; y: number }): void {
+    // Rising green particles
+    const numParticles = 12;
+    for (let i = 0; i < numParticles; i++) {
+      const particle = this.add.graphics();
+      particle.setDepth(50);
+      particle.fillStyle(0x44ff44, 0.8);
+      particle.fillCircle(0, 0, 4);
+
+      const startX = pos.x + Phaser.Math.Between(-30, 30);
+      const startY = pos.y + 20;
+      particle.setPosition(startX, startY);
+
+      this.time.delayedCall(i * 80, () => {
+        this.tweens.add({
+          targets: particle,
+          y: pos.y - 40 - Phaser.Math.Between(0, 20),
+          alpha: 0,
+          duration: 800,
+          ease: 'Quad.easeOut',
+          onComplete: () => particle.destroy()
+        });
+      });
+    }
+
+    // Green glow
+    const glow = this.add.graphics();
+    glow.setDepth(40);
+    glow.fillStyle(0x44ff44, 0.3);
+    glow.fillCircle(pos.x, pos.y, 60);
+
+    this.tweens.add({
+      targets: glow,
+      alpha: 0,
+      duration: 1500,
+      ease: 'Quad.easeOut',
+      onComplete: () => glow.destroy()
+    });
+  }
+
+  /**
+   * Play frenzy visual effect - fire burst
+   */
+  private playBossFrenzyEffect(pos: { x: number; y: number }): void {
+    // Screen shake
+    this.cameras.main.shake(300, 0.005);
+
+    // Multiple expanding fire rings
+    for (let i = 0; i < 3; i++) {
+      this.time.delayedCall(i * 150, () => {
+        const graphics = this.add.graphics();
+        graphics.setDepth(50);
+
+        let radius = 10;
+        let alpha = 0.9;
+
+        const animateRing = () => {
+          graphics.clear();
+          graphics.lineStyle(5 - i, 0xff6600, alpha);
+          graphics.strokeCircle(pos.x, pos.y, radius);
+
+          radius += 5;
+          alpha -= 0.04;
+
+          if (alpha > 0) {
+            this.time.delayedCall(16, animateRing);
+          } else {
+            graphics.destroy();
+          }
+        };
+
+        animateRing();
+      });
     }
   }
 

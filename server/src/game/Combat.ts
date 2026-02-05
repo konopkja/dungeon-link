@@ -125,6 +125,21 @@ export function processAbilityCast(
     case 'damage': {
       if (!targetEntity || !('isAlive' in targetEntity) || !targetEntity.isAlive) break;
 
+      // Check for boss invulnerability (e.g., Primordial Barrier)
+      if ('isInvulnerable' in targetEntity && targetEntity.isInvulnerable) {
+        console.log(`[DEBUG] Target is INVULNERABLE - damage blocked!`);
+        events.push({
+          sourceId: caster.id,
+          targetId: targetEntity.id,
+          abilityId,
+          damage: 0,
+          blocked: 0,
+          isCrit: false,
+          killed: false
+        });
+        break;
+      }
+
       const baseDamage = ability.baseDamage ?? 0;
       const scaledDamage = scaleAbilityDamage(baseDamage, rank);
 
@@ -459,6 +474,21 @@ export function processAoEDamageOnTarget(
     return { events, targetDied: false };
   }
 
+  // Check for boss invulnerability
+  if (targetEntity.isInvulnerable) {
+    console.log(`[DEBUG] AoE target is INVULNERABLE - damage blocked!`);
+    events.push({
+      sourceId: caster.id,
+      targetId: targetEntity.id,
+      abilityId,
+      damage: 0,
+      blocked: 0,
+      isCrit: false,
+      killed: false
+    });
+    return { events, targetDied: false };
+  }
+
   const ability = abilityInfo.ability;
 
   // Only handle damage type abilities for AoE
@@ -584,6 +614,27 @@ export function processEnemyAttack(
   }
 
   const result = processBasicAttack(enemy, target, enemy.type === 'caster');
+
+  // Apply enrage damage multiplier for bosses (e.g., Berserker Fury)
+  if (enemy.isEnraged && result.events.length > 0 && result.events[0].damage) {
+    const enrageMultiplier = 1.5; // Default 50% extra damage
+    const originalDamage = result.events[0].damage;
+    const bonusDamage = Math.round(originalDamage * (enrageMultiplier - 1));
+    const newDamage = originalDamage + bonusDamage;
+
+    // Apply the extra damage to the target
+    target.stats.health = Math.max(0, target.stats.health - bonusDamage);
+
+    // Check if this bonus damage killed the target
+    if (target.stats.health <= 0 && target.isAlive) {
+      target.isAlive = false;
+      result.targetDied = true;
+      result.events[0].killed = true;
+    }
+
+    result.events[0].damage = newDamage;
+    console.log(`[DEBUG] ENRAGED boss ${enemy.name} dealt ${newDamage} damage (${originalDamage} + ${bonusDamage} bonus)`);
+  }
 
   // Check for Power Word: Shield - absorbs damage before health
   // Check for Shield Wall buff - reduces all damage by 50%

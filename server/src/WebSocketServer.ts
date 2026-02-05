@@ -351,7 +351,7 @@ export class GameWebSocketServer {
     this.updateInterval = setInterval(() => {
       const updates = gameStateManager.update();
 
-      for (const [runId, { state, events, tauntEvents, collectedItems }] of updates) {
+      for (const [runId, { state, events, tauntEvents, collectedItems, bossPhaseEvents }] of updates) {
         // Broadcast state update only if something changed (per-client tracking)
         // This strips RunTracking and only sends relevant rooms
         this.broadcastStateToRun(runId, state);
@@ -369,6 +369,17 @@ export class GameWebSocketServer {
           this.broadcastToRun(runId, {
             type: 'TAUNT_EVENT',
             event
+          });
+        }
+
+        // Broadcast boss phase change events
+        for (const event of bossPhaseEvents) {
+          this.broadcastToRun(runId, {
+            type: 'BOSS_PHASE_CHANGE',
+            bossId: event.bossId,
+            bossName: event.bossName,
+            phase: event.phase,
+            mechanicName: event.mechanicName
           });
         }
 

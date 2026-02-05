@@ -293,3 +293,85 @@ export function getBossAbilitiesForFloor(bossId: string, floor: number): string[
   const count = getBossAbilityCount(floor);
   return boss.abilities.slice(0, count);
 }
+
+/**
+ * Get boss mechanics that trigger at a specific health percentage
+ */
+export function getBossMechanicsAtHealth(bossId: string, healthPercent: number): BossMechanic[] {
+  const boss = getBossById(bossId);
+  if (!boss) return [];
+
+  return boss.mechanics.filter(m =>
+    m.triggerHealthPercent !== undefined &&
+    healthPercent <= m.triggerHealthPercent
+  );
+}
+
+/**
+ * Boss phase configuration - defines what each phase mechanic does
+ */
+export interface BossPhaseEffect {
+  type: 'summon' | 'enrage' | 'shield' | 'regen' | 'aoe_burst';
+  // Summon config
+  summonCount?: number;
+  summonType?: 'skeleton' | 'zombie' | 'tentacle' | 'add';
+  // Enrage config
+  damageMultiplier?: number;
+  // Shield config
+  duration?: number;
+  // Regen config
+  regenPercent?: number;
+  regenDuration?: number;
+}
+
+/**
+ * Map of boss mechanic IDs to their actual effects
+ */
+export const BOSS_PHASE_EFFECTS: Record<string, BossPhaseEffect> = {
+  // Skeleton King - summons skeleton knights at 50%
+  'summon_skeletons': {
+    type: 'summon',
+    summonCount: 3,
+    summonType: 'skeleton'
+  },
+  // Orc Warlord - enrages at 30%
+  'enrage': {
+    type: 'enrage',
+    damageMultiplier: 1.5
+  },
+  // Lich - summons undead at 25%
+  'death_phase': {
+    type: 'summon',
+    summonCount: 4,
+    summonType: 'zombie'
+  },
+  // Dragon - fire burst at 50%
+  'flight_phase': {
+    type: 'aoe_burst',
+    summonCount: 5  // Number of fire pools to spawn
+  },
+  // Titan - invulnerable shield at 20%
+  'shield_phase': {
+    type: 'shield',
+    duration: 5,
+    regenPercent: 20,
+    regenDuration: 5
+  },
+  // Old God - tentacle spawns at 60% and 30%
+  'tentacles': {
+    type: 'summon',
+    summonCount: 2,
+    summonType: 'tentacle'
+  }
+};
+
+/**
+ * Get the effect configuration for a mechanic
+ */
+export function getPhaseEffect(mechanicId: string): BossPhaseEffect | undefined {
+  return BOSS_PHASE_EFFECTS[mechanicId];
+}
+
+// Re-export BossMechanic type for convenience
+import { BossMechanic } from '@dungeon-link/shared';
+export type { BossMechanic };

@@ -3,7 +3,7 @@ import {
   RunState, Player, ClassName, Equipment, EquipSlot, Rarity, Buff,
   PlayerInput, CombatEvent, TauntEvent, LootDrop, Position, Enemy, PotionType, Pet, AbilityType,
   GroundEffect, GroundEffectType, SaveData, VendorService, TargetType, GroundItem,
-  Trap, Chest, TrapType, FloorTheme, EnemyType, createRunTracking
+  Trap, Chest, TrapType, FloorTheme, EnemyType, createRunTracking, BossPhaseType, Stats
 } from '@dungeon-link/shared';
 import { getVendorServices, purchaseLevelUp, purchaseAbilityTrain, createVendor, createShopVendor, createCryptoVendor, getShopServices, sellItem, sellAllItems } from './Vendor.js';
 import { GAME_CONFIG, SPRITE_CONFIG } from '@dungeon-link/shared';
@@ -12,7 +12,7 @@ import { getClassById, getBaselineAbilities, getAbilityById } from '../data/clas
 import { processAbilityCast, processEnemyAttack, updateCooldowns, regenerateMana, isInRange, getDirection, processAoEDamageOnTarget } from './Combat.js';
 import { generateBossLoot, generateRareLoot, generateEnemyLoot, applyLootDrop, recalculateStats, getPartyAverageItemPower } from './Loot.js';
 import { getPartyScaling } from '../data/scaling.js';
-import { getBossAbilitiesForFloor } from '../data/bosses.js';
+import { getBossAbilitiesForFloor, getBossById, getBossMechanicsAtHealth, getPhaseEffect, BossPhaseEffect } from '../data/bosses.js';
 import { awardXP, getEnemyXP, initializePlayerLevel } from '../data/leveling.js';
 import { hasSetEffect } from '../data/sets.js';
 
@@ -640,6 +640,15 @@ export class GameStateManager {
           }
         }
 
+        // Check boss phases after damage (before checking death)
+        if (target && 'isBoss' in target) {
+          const enemy = target as Enemy;
+          if (enemy.isBoss && enemy.isAlive) {
+            // Check if any health-threshold phases should trigger
+            this.checkBossPhases(state, enemy);
+          }
+        }
+
         // Check if target died
         if (result.targetDied && target && 'isBoss' in target) {
           this.handleEnemyDeath(state, target as Enemy, player);
@@ -762,11 +771,14 @@ export class GameStateManager {
     return events;
   }
 
+  // Type for boss phase events returned from update
+  private pendingBossPhaseEvents: Map<string, { bossId: string; bossName: string; phase: BossPhaseType; mechanicName: string }[]> = new Map();
+
   /**
    * Update game state (called every tick)
    */
-  update(): Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }> {
-    const updates = new Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] }>();
+  update(): Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[]; bossPhaseEvents: { bossId: string; bossName: string; phase: BossPhaseType; mechanicName: string }[] }> {
+    const updates = new Map<string, { state: RunState; events: CombatEvent[]; tauntEvents: TauntEvent[]; collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[]; bossPhaseEvents: { bossId: string; bossName: string; phase: BossPhaseType; mechanicName: string }[] }>();
     const now = Date.now();
     const deltaTime = 1 / GAME_CONFIG.SERVER_TICK_RATE;
 
@@ -774,6 +786,14 @@ export class GameStateManager {
       const events: CombatEvent[] = [];
       const tauntEvents: TauntEvent[] = [];
       const collectedItems: { playerId: string; itemName: string; itemType: 'item' | 'potion' }[] = [];
+      const bossPhaseEvents: { bossId: string; bossName: string; phase: BossPhaseType; mechanicName: string }[] = [];
+
+      // Collect any pending boss phase events for this run
+      const pendingPhases = this.pendingBossPhaseEvents.get(runId);
+      if (pendingPhases) {
+        bossPhaseEvents.push(...pendingPhases);
+        this.pendingBossPhaseEvents.delete(runId);
+      }
 
       // Update player cooldowns and mana regen
       for (const player of state.players) {
@@ -1272,8 +1292,29 @@ export class GameStateManager {
             const isCrit = Math.random() * 100 < player.stats.crit;
             if (isCrit) damage = Math.round(damage * 1.5);
 
+            // Check for boss invulnerability
+            if (targetEnemy.isInvulnerable) {
+              console.log(`[DEBUG] Boss ${targetEnemy.name} is INVULNERABLE - auto-attack blocked!`);
+              events.push({
+                sourceId: player.id,
+                targetId: targetEnemy.id,
+                damage: 0,
+                blocked: 0,
+                isCrit: false,
+                killed: false
+              });
+              state.tracking.attackCooldowns.set(player.id, this.PLAYER_AUTO_ATTACK_COOLDOWN);
+              continue;
+            }
+
             targetEnemy.stats.health = Math.max(0, targetEnemy.stats.health - damage);
             const killed = targetEnemy.stats.health <= 0;
+
+            // Check boss phases if target survived
+            if (!killed && targetEnemy.isBoss) {
+              this.checkBossPhases(state, targetEnemy);
+            }
+
             if (killed) {
               targetEnemy.isAlive = false;
               this.handleEnemyDeath(state, targetEnemy, player);
@@ -1326,24 +1367,35 @@ export class GameStateManager {
               );
 
               if (nearbyEnemy) {
-                // Deal 100% of the original damage to the secondary target (full cleave)
-                const secondaryDamage = damage;
-                nearbyEnemy.stats.health = Math.max(0, nearbyEnemy.stats.health - secondaryDamage);
-                const secondaryKilled = nearbyEnemy.stats.health <= 0;
-                if (secondaryKilled) {
-                  nearbyEnemy.isAlive = false;
-                  this.handleEnemyDeath(state, nearbyEnemy, player);
+                // Check for invulnerability on secondary target
+                if (nearbyEnemy.isInvulnerable) {
+                  console.log(`[DEBUG] Blade Flurry target ${nearbyEnemy.name} is INVULNERABLE`);
+                } else {
+                  // Deal 100% of the original damage to the secondary target (full cleave)
+                  const secondaryDamage = damage;
+                  nearbyEnemy.stats.health = Math.max(0, nearbyEnemy.stats.health - secondaryDamage);
+                  const secondaryKilled = nearbyEnemy.stats.health <= 0;
+
+                  // Check boss phases if target survived
+                  if (!secondaryKilled && nearbyEnemy.isBoss) {
+                    this.checkBossPhases(state, nearbyEnemy);
+                  }
+
+                  if (secondaryKilled) {
+                    nearbyEnemy.isAlive = false;
+                    this.handleEnemyDeath(state, nearbyEnemy, player);
+                  }
+
+                  console.log(`[DEBUG] Blade Flurry hit ${nearbyEnemy.name} for ${secondaryDamage} damage`);
+
+                  events.push({
+                    sourceId: player.id,
+                    targetId: nearbyEnemy.id,
+                    damage: secondaryDamage,
+                    isCrit: false,
+                    killed: secondaryKilled
+                  });
                 }
-
-                console.log(`[DEBUG] Blade Flurry hit ${nearbyEnemy.name} for ${secondaryDamage} damage`);
-
-                events.push({
-                  sourceId: player.id,
-                  targetId: nearbyEnemy.id,
-                  damage: secondaryDamage,
-                  isCrit: false,
-                  killed: secondaryKilled
-                });
               }
             }
 
@@ -1962,6 +2014,12 @@ export class GameStateManager {
               if (dot.lastTickTime >= dot.tickInterval) {
                 dot.lastTickTime = 0;
 
+                // Skip damage if enemy is invulnerable (but DoT still ticks down)
+                if (enemy.isInvulnerable) {
+                  console.log(`[DEBUG] DoT on ${enemy.name} blocked - INVULNERABLE`);
+                  continue;
+                }
+
                 // Apply damage
                 const resist = enemy.stats.resist;
                 const reduction = 100 / (100 + resist);
@@ -1971,6 +2029,11 @@ export class GameStateManager {
 
                 // Find the source player for combat event
                 const sourcePlayer = state.players.find(p => p.id === dot.sourceId);
+
+                // Check boss phases if target survived (before death check)
+                if (enemy.stats.health > 0 && enemy.isBoss) {
+                  this.checkBossPhases(state, enemy);
+                }
 
                 events.push({
                   sourceId: dot.sourceId,
@@ -2598,7 +2661,7 @@ export class GameStateManager {
       }
 
       this.lastUpdate.set(runId, now);
-      updates.set(runId, { state, events, tauntEvents, collectedItems });
+      updates.set(runId, { state, events, tauntEvents, collectedItems, bossPhaseEvents });
     }
 
     return updates;
@@ -2804,6 +2867,217 @@ export class GameStateManager {
 
   // Pickup distance constant (increased for better auto-pickup)
   private readonly LOOT_PICKUP_DISTANCE = 100;
+
+  /**
+   * Check and trigger boss phase mechanics based on health thresholds.
+   * Called after a boss takes damage to see if any phases should activate.
+   *
+   * Phase events are queued in pendingBossPhaseEvents and broadcast via update().
+   */
+  checkBossPhases(state: RunState, boss: Enemy): void {
+    if (!boss.isBoss || !boss.bossId) return;
+
+    // Calculate current health percentage
+    const healthPercent = (boss.stats.health / boss.stats.maxHealth) * 100;
+
+    // Get mechanics that should trigger at this health level
+    const triggerableMechanics = getBossMechanicsAtHealth(boss.bossId, healthPercent);
+
+    for (const mechanic of triggerableMechanics) {
+      // Create unique key for this boss instance + mechanic combo
+      const phaseKey = `${boss.id}_${mechanic.id}`;
+
+      // Skip if already triggered
+      if (state.tracking.bossPhaseTriggered.has(phaseKey)) continue;
+
+      // Mark as triggered
+      state.tracking.bossPhaseTriggered.add(phaseKey);
+
+      // Get the effect configuration
+      const effect = getPhaseEffect(mechanic.id);
+      if (!effect) {
+        console.log(`[BOSS PHASE] No effect config for mechanic: ${mechanic.id}`);
+        continue;
+      }
+
+      console.log(`[BOSS PHASE] ${boss.name} triggered ${mechanic.name} at ${healthPercent.toFixed(1)}% health`);
+
+      // Apply the effect based on type
+      let phaseType: BossPhaseType;
+
+      switch (effect.type) {
+        case 'summon':
+          phaseType = BossPhaseType.Summon;
+          this.spawnBossMinions(state, boss, effect);
+          break;
+
+        case 'enrage':
+          phaseType = BossPhaseType.Enrage;
+          boss.isEnraged = true;
+          // Note: Damage multiplier is applied in processCombat
+          console.log(`[BOSS PHASE] ${boss.name} is now ENRAGED! Damage x${effect.damageMultiplier}`);
+          break;
+
+        case 'shield':
+          phaseType = BossPhaseType.Shield;
+          boss.isInvulnerable = true;
+          boss.isRegenerating = true;
+          // Schedule shield removal after duration
+          setTimeout(() => {
+            boss.isInvulnerable = false;
+            boss.isRegenerating = false;
+            console.log(`[BOSS PHASE] ${boss.name}'s shield has expired`);
+          }, (effect.duration ?? 5) * 1000);
+          // Start regeneration
+          if (effect.regenPercent) {
+            const regenAmount = Math.round(boss.stats.maxHealth * (effect.regenPercent / 100));
+            const regenPerTick = Math.round(regenAmount / ((effect.regenDuration ?? 5) * 2)); // 2 ticks per second
+            let ticksRemaining = (effect.regenDuration ?? 5) * 2;
+            const regenInterval = setInterval(() => {
+              if (!boss.isAlive || ticksRemaining <= 0) {
+                clearInterval(regenInterval);
+                return;
+              }
+              boss.stats.health = Math.min(boss.stats.maxHealth, boss.stats.health + regenPerTick);
+              ticksRemaining--;
+              console.log(`[BOSS PHASE] ${boss.name} regenerated ${regenPerTick} HP (${boss.stats.health}/${boss.stats.maxHealth})`);
+            }, 500);
+          }
+          console.log(`[BOSS PHASE] ${boss.name} activated SHIELD for ${effect.duration}s`);
+          break;
+
+        case 'aoe_burst':
+          phaseType = BossPhaseType.Frenzy;
+          // Spawn fire pools around the boss
+          this.spawnBossAoEBurst(state, boss, effect.summonCount ?? 5);
+          break;
+
+        case 'regen':
+          phaseType = BossPhaseType.Regenerate;
+          boss.isRegenerating = true;
+          break;
+
+        default:
+          phaseType = BossPhaseType.Frenzy;
+      }
+
+      // Queue phase event for broadcast via update()
+      const phaseEvent = {
+        bossId: boss.id,
+        bossName: boss.name,
+        phase: phaseType,
+        mechanicName: mechanic.name
+      };
+
+      let events = this.pendingBossPhaseEvents.get(state.runId);
+      if (!events) {
+        events = [];
+        this.pendingBossPhaseEvents.set(state.runId, events);
+      }
+      events.push(phaseEvent);
+    }
+  }
+
+  /**
+   * Spawn minions when a boss triggers a summon phase
+   */
+  private spawnBossMinions(state: RunState, boss: Enemy, effect: BossPhaseEffect): void {
+    const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+    if (!currentRoom) return;
+
+    const count = effect.summonCount ?? 2;
+    const type = effect.summonType ?? 'skeleton';
+
+    // Base stats for summoned minions (scale with floor)
+    const baseHealth = 50 + state.floor * 20;
+    const baseDamage = 5 + state.floor * 3;
+
+    for (let i = 0; i < count; i++) {
+      // Spawn in a circle around the boss
+      const angle = (i / count) * Math.PI * 2;
+      const radius = 80;
+      const spawnX = boss.position.x + Math.cos(angle) * radius;
+      const spawnY = boss.position.y + Math.sin(angle) * radius;
+
+      const minion: Enemy = {
+        id: `${boss.id}_minion_${Date.now()}_${i}`,
+        type: EnemyType.Melee,
+        name: this.getMinionName(type, i),
+        position: { x: spawnX, y: spawnY },
+        stats: {
+          health: baseHealth,
+          maxHealth: baseHealth,
+          mana: 0,
+          maxMana: 0,
+          attackPower: baseDamage,
+          spellPower: 0,
+          armor: 10,
+          resist: 5,
+          crit: 5,
+          haste: 0,
+          lifesteal: 0
+        },
+        isAlive: true,
+        targetId: null,
+        isBoss: false,
+        isRare: false,
+        debuffs: [],
+        summonedById: boss.id
+      };
+
+      currentRoom.enemies.push(minion);
+      console.log(`[BOSS PHASE] Spawned ${minion.name} at (${Math.round(spawnX)}, ${Math.round(spawnY)})`);
+    }
+
+    console.log(`[BOSS PHASE] ${boss.name} summoned ${count} ${type}s!`);
+  }
+
+  /**
+   * Get a thematic name for summoned minions
+   */
+  private getMinionName(type: string, index: number): string {
+    const names: Record<string, string[]> = {
+      skeleton: ['Risen Knight', 'Skeleton Warrior', 'Bone Guardian', 'Undead Soldier'],
+      zombie: ['Shambling Corpse', 'Rotting Dead', 'Risen Servant', 'Walking Decay'],
+      tentacle: ['Void Tendril', 'Shadow Appendage', 'Dark Grasp', 'Abyssal Tentacle'],
+      add: ['Servant', 'Minion', 'Thrall', 'Spawn']
+    };
+    const typeNames = names[type] || names.add;
+    return typeNames[index % typeNames.length];
+  }
+
+  /**
+   * Spawn AoE ground effects when a boss enters flight/burst phase
+   */
+  private spawnBossAoEBurst(state: RunState, boss: Enemy, count: number): void {
+    const currentRoom = state.dungeon.rooms.find(r => r.id === state.dungeon.currentRoomId);
+    if (!currentRoom) return;
+
+    // Spawn fire pools around the arena
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+      const radius = 100 + Math.random() * 150;
+      const effectX = boss.position.x + Math.cos(angle) * radius;
+      const effectY = boss.position.y + Math.sin(angle) * radius;
+
+      const firePool: GroundEffect = {
+        id: `boss_fire_${Date.now()}_${i}`,
+        type: GroundEffectType.FirePool,
+        position: { x: effectX, y: effectY },
+        radius: 60,
+        maxRadius: 60,
+        damage: 15 + state.floor * 3,
+        tickInterval: 0.5,
+        duration: 8,
+        sourceId: boss.id,
+        color: '#ff6600'
+      };
+
+      state.groundEffects.push(firePool);
+    }
+
+    console.log(`[BOSS PHASE] ${boss.name} spawned ${count} fire pools!`);
+  }
 
   /**
    * Handle enemy death

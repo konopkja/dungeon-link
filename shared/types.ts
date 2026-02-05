@@ -59,6 +59,15 @@ export enum TargetType {
   Ground = 'ground'
 }
 
+// Boss phase types for visual feedback
+export enum BossPhaseType {
+  Enrage = 'enrage',           // Damage increase (visual: size up, red tint)
+  Summon = 'summon',           // Spawned minions (visual: spawn effect)
+  Shield = 'shield',           // Invulnerable (visual: shield bubble)
+  Regenerate = 'regenerate',   // Healing (visual: heal effect)
+  Frenzy = 'frenzy'            // Multiple effects combined
+}
+
 // ============================================
 // FLOOR THEMES
 // ============================================
@@ -294,6 +303,14 @@ export interface Enemy {
    * Set to true when spawned in 'ambush' variant room.
    */
   isHidden?: boolean;
+  /**
+   * Boss phase mechanics - set when health thresholds are crossed.
+   * These are lightweight flags checked during damage calculation.
+   */
+  isEnraged?: boolean;       // Damage multiplier active (e.g., Berserker Fury)
+  isInvulnerable?: boolean;  // Cannot take damage (e.g., Primordial Barrier)
+  isRegenerating?: boolean;  // Healing over time active
+  summonedById?: string;     // If this enemy was summoned by a boss, track the boss ID
 }
 
 export interface Pet {
@@ -511,6 +528,9 @@ export interface RunTracking {
   ambushTriggered: Set<string>;
   // Room modifier: burning damage tick tracking (playerId_roomId -> last tick time)
   modifierDamageTicks: Map<string, number>;
+  // Boss phase tracking (bossId_phaseId -> triggered)
+  // Prevents re-triggering health-based phases
+  bossPhaseTriggered: Set<string>;
 }
 
 /**
@@ -534,6 +554,7 @@ export function createRunTracking(): RunTracking {
     enemyChargeCooldowns: new Map(),
     ambushTriggered: new Set(),
     modifierDamageTicks: new Map(),
+    bossPhaseTriggered: new Set(),
   };
 }
 
@@ -613,6 +634,7 @@ export type ServerMessage =
   | { type: 'TRAP_TRIGGERED'; trapId: string; playerId: string; damage: number } // Player hit by trap
   | { type: 'POTION_USED'; playerId: string; potionType: 'health' | 'mana' } // Player used a potion
   | { type: 'SOULSTONE_REVIVE'; playerId: string; position: Position } // Player revived by Soulstone
+  | { type: 'BOSS_PHASE_CHANGE'; bossId: string; bossName: string; phase: BossPhaseType; mechanicName: string } // Boss entered new phase
   | { type: 'PONG' }
   // Crypto messages
   | { type: 'WALLET_CONNECTED'; walletAddress: string; cryptoAccountId: string }
