@@ -345,7 +345,9 @@ export class StateTracker {
       abilityCooldowns: player.abilities.map(a => ({
         abilityId: a.abilityId,
         currentCooldown: a.currentCooldown
-      }))
+      })),
+      backpack: player.backpack,
+      equipment: player.equipment
     };
   }
 

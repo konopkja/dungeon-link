@@ -707,6 +707,10 @@ export interface DeltaPlayer {
   buffs: Buff[];
   // Ability cooldowns only (not full ability data)
   abilityCooldowns: { abilityId: string; currentCooldown: number }[];
+  // Inventory - items and potions picked up during gameplay
+  backpack: (Item | Potion)[];
+  // Equipment changes (from vendor swaps, etc.)
+  equipment: Equipment;
 }
 
 export interface DeltaPet {

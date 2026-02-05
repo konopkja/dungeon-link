@@ -586,6 +586,10 @@ export class WebSocketClient {
             ability.currentCooldown = cd.currentCooldown;
           }
         }
+        // Update inventory (items and potions picked up)
+        player.backpack = deltaPlayer.backpack;
+        // Update equipment (from vendor swaps, etc.)
+        player.equipment = deltaPlayer.equipment;
       }
     }
 
