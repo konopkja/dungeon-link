@@ -64,6 +64,9 @@ export class StateTracker {
   // Track which clients have received initial full sync
   private clientsWithFullSync: Set<string> = new Set();
 
+  // Track enemy IDs per client to detect newly spawned enemies
+  private clientEnemyIds: Map<string, Set<string>> = new Map();
+
   /**
    * Prepare state for client broadcast.
    * Returns null if nothing meaningful has changed.
@@ -243,21 +246,47 @@ export class StateTracker {
   }
 
   /**
-   * Mark client as having received full sync
+   * Mark client as having received full sync and record initial enemy IDs
    */
-  markFullSyncSent(clientId: string): void {
+  markFullSyncSent(clientId: string, state?: RunState): void {
     this.clientsWithFullSync.add(clientId);
+
+    // Record all enemy IDs from the full sync
+    if (state) {
+      const enemyIds = this.extractAllEnemyIds(state);
+      this.clientEnemyIds.set(clientId, enemyIds);
+    }
+  }
+
+  /**
+   * Extract all enemy IDs from state
+   */
+  private extractAllEnemyIds(state: RunState): Set<string> {
+    const ids = new Set<string>();
+    for (const room of state.dungeon.rooms) {
+      for (const enemy of room.enemies) {
+        ids.add(enemy.id);
+      }
+    }
+    return ids;
   }
 
   /**
    * Generate delta state containing only dynamic data
    * This reduces payload from ~10KB to ~500-1000 bytes
+   *
+   * @param state Current run state
+   * @param clientId Client ID for tracking newly spawned enemies
    */
-  generateDeltaState(state: RunState): DeltaState | null {
+  generateDeltaState(state: RunState, clientId?: string): DeltaState | null {
+    // Detect newly spawned enemies (e.g., boss summons)
+    const newEnemies = clientId ? this.detectNewEnemies(state, clientId) : undefined;
+
     const delta: DeltaState = {
       players: state.players.map(p => this.extractDeltaPlayer(p)),
       pets: state.pets.map(pet => this.extractDeltaPet(pet)),
       enemies: this.extractDeltaEnemies(state.dungeon.rooms),
+      newEnemies: newEnemies && newEnemies.length > 0 ? newEnemies : undefined,
       rooms: state.dungeon.rooms.map(r => ({ id: r.id, cleared: r.cleared })),
       chests: this.extractDeltaChests(state.dungeon.rooms),
       groundEffects: state.groundEffects,
@@ -267,6 +296,36 @@ export class StateTracker {
     };
 
     return delta;
+  }
+
+  /**
+   * Detect enemies that exist in state but weren't in the last sync to this client.
+   * Returns full enemy data for these so client can create sprites.
+   */
+  private detectNewEnemies(state: RunState, clientId: string): import('@dungeon-link/shared').NewEnemy[] {
+    const knownEnemyIds = this.clientEnemyIds.get(clientId);
+    if (!knownEnemyIds) {
+      // Client doesn't have any known enemies, shouldn't happen after full sync
+      return [];
+    }
+
+    const newEnemies: import('@dungeon-link/shared').NewEnemy[] = [];
+
+    for (const room of state.dungeon.rooms) {
+      for (const enemy of room.enemies) {
+        if (!knownEnemyIds.has(enemy.id)) {
+          // This is a new enemy the client doesn't know about
+          newEnemies.push({
+            roomId: room.id,
+            enemy: enemy
+          });
+          // Track this enemy ID for future deltas
+          knownEnemyIds.add(enemy.id);
+        }
+      }
+    }
+
+    return newEnemies;
   }
 
   private extractDeltaPlayer(player: Player): DeltaPlayer {
@@ -345,6 +404,7 @@ export class StateTracker {
   removeClient(clientId: string): void {
     this.lastStates.delete(clientId);
     this.clientsWithFullSync.delete(clientId);
+    this.clientEnemyIds.delete(clientId);
   }
 
   /**
@@ -353,6 +413,7 @@ export class StateTracker {
   invalidateClient(clientId: string): void {
     this.lastStates.delete(clientId);
     this.clientsWithFullSync.delete(clientId);
+    this.clientEnemyIds.delete(clientId);
   }
 
   /**

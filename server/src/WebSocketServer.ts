@@ -431,7 +431,8 @@ export class GameWebSocketServer {
               type: 'STATE_UPDATE',
               state: clientState as import('@dungeon-link/shared').RunState
             });
-            stateTracker.markFullSyncSent(client.clientId);
+            // Pass state to track initial enemy IDs
+            stateTracker.markFullSyncSent(client.clientId, state);
 
             // Track payload sizes
             this.totalFullSyncBytes += payload.length;
@@ -443,7 +444,8 @@ export class GameWebSocketServer {
 
           // Only send if state changed
           if (clientState !== null) {
-            const delta = stateTracker.generateDeltaState(state);
+            // Pass clientId to detect newly spawned enemies (boss summons, etc.)
+            const delta = stateTracker.generateDeltaState(state, client.clientId);
             if (delta !== null) {
               const payload = JSON.stringify({ type: 'DELTA_UPDATE', delta });
               this.send(ws, {

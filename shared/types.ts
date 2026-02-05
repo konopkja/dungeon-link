@@ -665,6 +665,9 @@ export interface DeltaState {
   pets: DeltaPet[];
   // Enemy dynamic data per room
   enemies: DeltaEnemy[];
+  // NEW enemies spawned since last sync (full data needed to create sprites)
+  // Used when boss summons adds, ambush triggers, etc.
+  newEnemies?: NewEnemy[];
   // Room status changes
   rooms: DeltaRoom[];
   // Chest status changes
@@ -677,6 +680,16 @@ export interface DeltaState {
   currentRoomId: string;
   // Pending loot
   pendingLoot: LootDrop[];
+}
+
+/**
+ * Full enemy data for newly spawned enemies.
+ * Delta updates only contain position/health, but new enemies need
+ * full data (type, name, isBoss, etc.) to create sprites on client.
+ */
+export interface NewEnemy {
+  roomId: string;
+  enemy: Enemy;
 }
 
 export interface DeltaPlayer {

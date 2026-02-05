@@ -547,6 +547,23 @@ export class WebSocketClient {
   private applyDeltaUpdate(delta: DeltaState): void {
     if (!this.currentState) return;
 
+    // FIRST: Add any newly spawned enemies to the cached state
+    // This must happen before updating enemies so the new enemies exist in the room
+    if (delta.newEnemies && delta.newEnemies.length > 0) {
+      for (const newEnemy of delta.newEnemies) {
+        const room = this.currentState.dungeon.rooms.find(r => r.id === newEnemy.roomId);
+        if (room) {
+          // Check if enemy doesn't already exist (shouldn't, but be safe)
+          if (!room.enemies.find(e => e.id === newEnemy.enemy.id)) {
+            room.enemies.push(newEnemy.enemy);
+            if (DEBUG_LOGGING) {
+              console.log(`[WS] Added new enemy: ${newEnemy.enemy.name} (${newEnemy.enemy.id}) to room ${newEnemy.roomId}`);
+            }
+          }
+        }
+      }
+    }
+
     // Update players
     for (const deltaPlayer of delta.players) {
       const player = this.currentState.players.find(p => p.id === deltaPlayer.id);
@@ -584,7 +601,7 @@ export class WebSocketClient {
       }
     }
 
-    // Update enemies
+    // Update enemies (now includes newly added enemies from above)
     for (const deltaEnemy of delta.enemies) {
       const room = this.currentState.dungeon.rooms.find(r => r.id === deltaEnemy.roomId);
       if (room) {
