@@ -620,11 +620,12 @@ export class WebSocketClient {
       }
     }
 
-    // Update room cleared status
+    // Update room cleared status and ground items
     for (const deltaRoom of delta.rooms) {
       const room = this.currentState.dungeon.rooms.find(r => r.id === deltaRoom.id);
       if (room) {
         room.cleared = deltaRoom.cleared;
+        room.groundItems = deltaRoom.groundItems;
       }
     }
 

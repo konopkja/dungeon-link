@@ -287,7 +287,7 @@ export class StateTracker {
       pets: state.pets.map(pet => this.extractDeltaPet(pet)),
       enemies: this.extractDeltaEnemies(state.dungeon.rooms),
       newEnemies: newEnemies && newEnemies.length > 0 ? newEnemies : undefined,
-      rooms: state.dungeon.rooms.map(r => ({ id: r.id, cleared: r.cleared })),
+      rooms: state.dungeon.rooms.map(r => ({ id: r.id, cleared: r.cleared, groundItems: r.groundItems })),
       chests: this.extractDeltaChests(state.dungeon.rooms),
       groundEffects: state.groundEffects,
       inCombat: state.inCombat,

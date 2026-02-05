@@ -743,6 +743,8 @@ export interface DeltaEnemy {
 export interface DeltaRoom {
   id: string;
   cleared: boolean;
+  // Ground items dropped by enemies (loot)
+  groundItems?: GroundItem[];
 }
 
 export interface DeltaChest {
