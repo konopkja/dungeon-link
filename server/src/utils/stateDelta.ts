@@ -292,6 +292,7 @@ export class StateTracker {
       groundEffects: state.groundEffects,
       inCombat: state.inCombat,
       currentRoomId: state.dungeon.currentRoomId,
+      bossDefeated: state.dungeon.bossDefeated,
       pendingLoot: state.pendingLoot
     };
 

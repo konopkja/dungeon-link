@@ -678,6 +678,8 @@ export interface DeltaState {
   inCombat: boolean;
   // Current room
   currentRoomId: string;
+  // Boss defeated flag (triggers floor advance prompt)
+  bossDefeated: boolean;
   // Pending loot
   pendingLoot: LootDrop[];
 }

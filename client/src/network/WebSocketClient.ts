@@ -648,6 +648,7 @@ export class WebSocketClient {
     this.currentState.groundEffects = delta.groundEffects;
     this.currentState.inCombat = delta.inCombat;
     this.currentState.dungeon.currentRoomId = delta.currentRoomId;
+    this.currentState.dungeon.bossDefeated = delta.bossDefeated;
     this.currentState.pendingLoot = delta.pendingLoot;
   }
 
