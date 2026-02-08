@@ -131,7 +131,7 @@ describe('validateSaveData', () => {
   describe('backpack', () => {
     it('rejects backpack larger than 20', () => {
       const data = validSaveData();
-      data.backpack = Array.from({ length: 21 }, (_, i) => ({ id: `item_${i}` }));
+      data.backpack = Array.from({ length: 21 }, (_, i) => ({ id: `item_${i}` })) as any;
       expect(validateSaveData(data)).toBe('Backpack too large');
     });
   });

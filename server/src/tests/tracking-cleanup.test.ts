@@ -146,7 +146,7 @@ describe('GameState tracking cleanup', () => {
 
     it('clears pending loot', () => {
       const { runId, state } = gsm.createRun('Hero', ClassName.Warrior);
-      state.pendingLoot = [{ item: {} as any, position: { x: 0, y: 0 } }];
+      state.pendingLoot = [{ type: 'item', item: {} as any }];
 
       state.dungeon.bossDefeated = true;
       const newState = gsm.advanceFloor(runId);
