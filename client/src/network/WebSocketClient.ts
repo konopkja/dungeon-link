@@ -13,6 +13,21 @@ type ConnectionHandler = () => void;
 // Set to true to enable verbose debug logging (CAUSES LAG - only for debugging)
 const DEBUG_LOGGING = false;
 
+/**
+ * Connection state machine to prevent race conditions.
+ * See docs/BUG_FIXES_2026_02.md "WebSocket Connection State Machine" for context.
+ *
+ * Valid transitions:
+ *   DISCONNECTED -> CONNECTING (via connect())
+ *   CONNECTING -> CONNECTED (via onopen)
+ *   CONNECTING -> DISCONNECTED (via onerror/onclose or disconnect())
+ *   CONNECTED -> RECONNECTING (via onclose when not intentionally disconnected)
+ *   CONNECTED -> DISCONNECTED (via disconnect())
+ *   RECONNECTING -> CONNECTING (via reconnect timer)
+ *   RECONNECTING -> DISCONNECTED (via disconnect() or max attempts)
+ */
+type ConnectionState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING';
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private messageHandlers: Set<MessageHandler> = new Set();
@@ -20,6 +35,9 @@ export class WebSocketClient {
   private disconnectHandlers: Set<ConnectionHandler> = new Set();
   private reconnectAttempts = 0;
   private reconnectTimeout: number | null = null;
+  private connectionState: ConnectionState = 'DISCONNECTED';
+  // Flag to distinguish intentional disconnect from unexpected close
+  private intentionalDisconnect = false;
 
   // State deduplication - prevents processing identical updates
   // See docs/PERFORMANCE-STATE-UPDATES.md for context
@@ -39,17 +57,39 @@ export class WebSocketClient {
   constructor() {}
 
   /**
-   * Connect to the WebSocket server
-   * Uses WS_URL from config which respects environment variables
+   * Get the current connection state (for testing/debugging)
+   */
+  getConnectionState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  /**
+   * Connect to the WebSocket server.
+   * Uses WS_URL from config which respects environment variables.
+   *
+   * Returns a Promise that resolves on successful connection.
+   * If already connecting/connected, returns immediately.
    */
   connect(): Promise<void> {
+    // Guard: prevent double-connect
+    if (this.connectionState === 'CONNECTING' || this.connectionState === 'CONNECTED') {
+      return Promise.resolve();
+    }
+
+    this.connectionState = 'CONNECTING';
+    this.intentionalDisconnect = false;
+
     return new Promise((resolve, reject) => {
       try {
         console.log(`[WS] Connecting to ${WS_URL}`);
         this.ws = new WebSocket(WS_URL);
+        let settled = false;
 
         this.ws.onopen = () => {
+          if (settled) return;
+          settled = true;
           console.log('Connected to server');
+          this.connectionState = 'CONNECTED';
           this.isConnected = true;
           this.reconnectAttempts = 0;
           this.connectHandlers.forEach(h => h());
@@ -57,6 +97,8 @@ export class WebSocketClient {
         };
 
         this.ws.onmessage = (event) => {
+          // Guard: don't process messages if we've been intentionally disconnected
+          if (this.connectionState === 'DISCONNECTED') return;
           try {
             const message = JSON.parse(event.data) as ServerMessage;
             this.handleMessage(message);
@@ -66,43 +108,82 @@ export class WebSocketClient {
         };
 
         this.ws.onclose = () => {
-          console.log('Disconnected from server');
+          const wasConnected = this.connectionState === 'CONNECTED';
+          // Only transition if not already DISCONNECTED (intentional disconnect)
+          if (this.connectionState === 'DISCONNECTED') return;
+
           this.isConnected = false;
-          this.disconnectHandlers.forEach(h => h());
-          this.attemptReconnect();
+
+          if (this.intentionalDisconnect) {
+            // Intentional disconnect — don't reconnect, don't fire handlers again
+            this.connectionState = 'DISCONNECTED';
+            return;
+          }
+
+          if (wasConnected) {
+            // Was connected, lost connection — notify handlers and try to reconnect
+            console.log('Disconnected from server');
+            this.connectionState = 'RECONNECTING';
+            this.disconnectHandlers.forEach(h => h());
+            this.attemptReconnect();
+          } else {
+            // Failed during CONNECTING — reject the promise, don't auto-reconnect
+            // (the caller, e.g. BootScene, should handle retry)
+            this.connectionState = 'DISCONNECTED';
+            if (!settled) {
+              settled = true;
+              reject(new Error('WebSocket connection failed'));
+            }
+          }
         };
 
-        this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          reject(error);
+        this.ws.onerror = (_error) => {
+          // onerror is always followed by onclose. We use onclose for state transitions.
+          // Only reject here if onclose hasn't already handled it.
+          if (!settled) {
+            settled = true;
+            // Don't reject here — let onclose handle the state transition and rejection.
+            // This prevents double-fire of onerror+onclose causing issues.
+          }
         };
       } catch (e) {
+        this.connectionState = 'DISCONNECTED';
         reject(e);
       }
     });
   }
 
   /**
-   * Disconnect from server
+   * Disconnect from server intentionally.
+   * Stops reconnection attempts and cleans up the socket.
    */
   disconnect(): void {
+    this.intentionalDisconnect = true;
+    this.connectionState = 'DISCONNECTED';
+    this.isConnected = false;
+
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
     if (this.ws) {
+      this.ws.onclose = null; // Prevent onclose handler from firing
+      this.ws.onerror = null;
+      this.ws.onmessage = null;
       this.ws.close();
       this.ws = null;
     }
-    this.isConnected = false;
   }
 
   /**
-   * Attempt to reconnect
+   * Attempt to reconnect with exponential backoff.
+   * Only runs when connectionState is RECONNECTING.
    */
   private attemptReconnect(): void {
+    if (this.connectionState !== 'RECONNECTING') return;
     if (this.reconnectAttempts >= WS_CONFIG.MAX_RECONNECT_ATTEMPTS) {
       console.log('Max reconnect attempts reached');
+      this.connectionState = 'DISCONNECTED';
       return;
     }
 
@@ -110,7 +191,23 @@ export class WebSocketClient {
     console.log(`Attempting to reconnect (${this.reconnectAttempts}/${WS_CONFIG.MAX_RECONNECT_ATTEMPTS})...`);
 
     this.reconnectTimeout = window.setTimeout(() => {
-      this.connect().catch(() => {});
+      if (this.connectionState !== 'RECONNECTING') return;
+      // Transition back to allow connect() to proceed
+      this.connectionState = 'DISCONNECTED';
+      this.connect().then(() => {
+        // Reconnected successfully — but the server doesn't know who we are.
+        // The old run was cleaned up server-side on disconnect.
+        // Signal to the UI that we need to return to menu.
+        console.log('[WS] Reconnected, but run state is lost. Returning to menu.');
+        this.runId = null;
+        this.playerId = null;
+        this.currentState = null;
+      }).catch(() => {
+        // Failed to reconnect — try again
+        if (this.connectionState === 'CONNECTED') return; // shouldn't happen
+        this.connectionState = 'RECONNECTING';
+        this.attemptReconnect();
+      });
     }, WS_CONFIG.RECONNECT_DELAY * this.reconnectAttempts);
   }
 
@@ -604,9 +701,11 @@ export class WebSocketClient {
     }
 
     // Update enemies (now includes newly added enemies from above)
+    // Search ALL rooms for the enemy because patrol enemies can move between rooms
+    // and the client's cached room might differ from the server's current room
     for (const deltaEnemy of delta.enemies) {
-      const room = this.currentState.dungeon.rooms.find(r => r.id === deltaEnemy.roomId);
-      if (room) {
+      let enemyFound = false;
+      for (const room of this.currentState.dungeon.rooms) {
         const enemy = room.enemies.find(e => e.id === deltaEnemy.id);
         if (enemy) {
           enemy.position = deltaEnemy.position;
@@ -619,6 +718,8 @@ export class WebSocketClient {
           enemy.isEnraged = deltaEnemy.isEnraged;
           enemy.isInvulnerable = deltaEnemy.isInvulnerable;
           enemy.isRegenerating = deltaEnemy.isRegenerating;
+          enemyFound = true;
+          break; // Found the enemy, no need to search other rooms
         }
       }
     }
@@ -657,39 +758,49 @@ export class WebSocketClient {
    * Focuses on frequently-changing data to detect meaningful changes.
    * See docs/PERFORMANCE-STATE-UPDATES.md for context.
    */
+  /**
+   * Compute a lightweight hash of the game state for deduplication.
+   * Covers all fields that can change between updates to prevent
+   * dropping meaningful STATE_UPDATEs.
+   * See docs/BUG_FIXES_2026_02.md "State Hash Improvements" for context.
+   */
   private computeStateHash(state: RunState): string {
-    // Fast hash focusing on key changing elements
     const parts: string[] = [
       state.runId,
       String(state.floor),
       String(state.inCombat),
       state.dungeon?.currentRoomId || '',
+      String(state.dungeon?.bossDefeated || false),
       String(state.groundEffects?.length || 0)
     ];
 
-    // Hash player positions and key stats (most frequent changes)
+    // Hash player data — include all dynamic fields
     if (state.players) {
       for (const player of state.players) {
         parts.push(
           player.id,
-          // Round positions to avoid micro-movement hash changes
           String(Math.round(player.position.x)),
           String(Math.round(player.position.y)),
           String(Math.round(player.stats.health)),
           String(Math.round(player.stats.mana)),
           String(player.isAlive),
           player.targetId || '',
-          // Include gold, level, xp, abilities for vendor purchase detection
           String(player.gold),
           String(player.level),
           String(player.xp),
-          String(player.abilities?.length || 0),
-          String(player.backpack?.length || 0)
+          // Include ability ranks, not just count
+          (player.abilities || []).map(a => `${a.abilityId}:${a.rank}`).join(','),
+          // Include backpack item IDs
+          (player.backpack || []).map(i => i.id).join(','),
+          // Include equipment IDs for swap detection
+          Object.values(player.equipment || {}).map(e => e?.id || '').join(','),
+          // Include buff count and IDs for boss phase/modifier detection
+          (player.buffs || []).map(b => b.id).join(',')
         );
       }
     }
 
-    // Hash enemy states in current room only (optimization)
+    // Hash enemy states in current room + boss flags
     const currentRoom = state.dungeon?.rooms?.find(r => r.id === state.dungeon.currentRoomId);
     if (currentRoom?.enemies) {
       for (const enemy of currentRoom.enemies) {
@@ -698,8 +809,16 @@ export class WebSocketClient {
           String(Math.round(enemy.position.x)),
           String(Math.round(enemy.position.y)),
           String(Math.round(enemy.stats.health)),
-          String(enemy.isAlive)
+          String(enemy.isAlive),
+          String(enemy.isEnraged || false),
+          String(enemy.isInvulnerable || false)
         );
+      }
+      // Include chest states for current room
+      if (currentRoom.chests) {
+        for (const chest of currentRoom.chests) {
+          parts.push(chest.id, String(chest.isOpen));
+        }
       }
     }
 

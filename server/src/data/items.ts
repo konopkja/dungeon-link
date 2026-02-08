@@ -121,8 +121,8 @@ function generateStats(
   const availableStats = Object.keys(weights) as (keyof ItemStats)[];
   const numStats = rng.nextInt(minStats, maxStats);
 
-  // Shuffle and pick stats
-  const shuffled = [...availableStats].sort(() => rng.next() - 0.5);
+  // Shuffle and pick stats (using proper Fisher-Yates shuffle for uniform distribution)
+  const shuffled = rng.shuffle(availableStats);
   const selectedStats = shuffled.slice(0, numStats);
 
   for (const stat of selectedStats) {

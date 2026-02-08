@@ -23,12 +23,60 @@ interface ClientConnection {
   clientId: string;  // Unique ID for state tracking
   playerId: string | null;
   runId: string | null;
+  // Rate limiting: track message timestamps
+  messageTimes: number[];
+}
+
+// Rate limit: max messages per second per client
+const RATE_LIMIT_WINDOW_MS = 1000;
+const RATE_LIMIT_MAX_MESSAGES = 60; // 60 msgs/sec is generous for 20Hz game
+
+// Save data validation limits
+const MAX_PLAYER_LEVEL = 50;
+const MAX_FLOOR = 30;
+const MAX_GOLD = 99999;
+const MAX_ABILITIES = 10;
+const MAX_BACKPACK_SIZE = 20;
+const VALID_CLASS_IDS = ['warrior', 'paladin', 'hunter', 'rogue', 'priest', 'shaman', 'mage', 'warlock', 'druid'];
+
+/**
+ * Validate save data from client to prevent fabricated characters.
+ * Returns an error string if invalid, null if valid.
+ */
+export function validateSaveData(saveData: any): string | null {
+  if (!saveData || typeof saveData !== 'object') return 'Invalid save data';
+  if (typeof saveData.playerName !== 'string' || saveData.playerName.length === 0 || saveData.playerName.length > 30) {
+    return 'Invalid player name';
+  }
+  if (!VALID_CLASS_IDS.includes(saveData.classId)) return 'Invalid class ID';
+  if (typeof saveData.level !== 'number' || saveData.level < 1 || saveData.level > MAX_PLAYER_LEVEL) {
+    return 'Invalid level';
+  }
+  if (typeof saveData.gold !== 'number' || saveData.gold < 0 || saveData.gold > MAX_GOLD) {
+    return 'Invalid gold';
+  }
+  if (typeof saveData.highestFloor !== 'number' || saveData.highestFloor < 1 || saveData.highestFloor > MAX_FLOOR) {
+    return 'Invalid floor';
+  }
+  if (Array.isArray(saveData.abilities) && saveData.abilities.length > MAX_ABILITIES) {
+    return 'Too many abilities';
+  }
+  if (Array.isArray(saveData.backpack) && saveData.backpack.length > MAX_BACKPACK_SIZE) {
+    return 'Backpack too large';
+  }
+  if (typeof saveData.xp !== 'number' || saveData.xp < 0) return 'Invalid XP';
+  if (typeof saveData.lives !== 'undefined' && (typeof saveData.lives !== 'number' || saveData.lives < 0 || saveData.lives > 5)) {
+    return 'Invalid lives';
+  }
+  return null;
 }
 
 export class GameWebSocketServer {
   private wss: WebSocketServer;
   private httpServer: ReturnType<typeof createServer>;
   private clients: Map<WebSocket, ClientConnection> = new Map();
+  // Index for O(1) broadcast to run instead of O(all_clients) scan
+  private runClients: Map<string, Set<WebSocket>> = new Map();
   private updateInterval: NodeJS.Timeout | null = null;
 
   constructor(port: number = WS_CONFIG.PORT) {
@@ -76,7 +124,8 @@ export class GameWebSocketServer {
       ws,
       clientId,
       playerId: null,
-      runId: null
+      runId: null,
+      messageTimes: []
     };
 
     this.clients.set(ws, client);
@@ -101,6 +150,10 @@ export class GameWebSocketServer {
           cleanupCryptoState(client.runId);
         }
       }
+      // Clean up run-to-client index
+      if (client.runId) {
+        this.removeFromRunIndex(client.runId, ws);
+      }
       // Clean up state tracking for this client
       stateTracker.removeClient(client.clientId);
       this.clients.delete(ws);
@@ -111,7 +164,53 @@ export class GameWebSocketServer {
     });
   }
 
+  /**
+   * Add a WebSocket to the run-to-client index for O(1) broadcast.
+   */
+  private addToRunIndex(runId: string, ws: WebSocket): void {
+    let clients = this.runClients.get(runId);
+    if (!clients) {
+      clients = new Set();
+      this.runClients.set(runId, clients);
+    }
+    clients.add(ws);
+  }
+
+  /**
+   * Remove a WebSocket from the run-to-client index.
+   */
+  private removeFromRunIndex(runId: string, ws: WebSocket): void {
+    const clients = this.runClients.get(runId);
+    if (clients) {
+      clients.delete(ws);
+      if (clients.size === 0) {
+        this.runClients.delete(runId);
+      }
+    }
+  }
+
+  /**
+   * Check if client is sending messages too fast.
+   * Returns true if rate limited (message should be dropped).
+   */
+  private isRateLimited(client: ClientConnection): boolean {
+    const now = Date.now();
+    // Remove timestamps outside the window
+    client.messageTimes = client.messageTimes.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+    if (client.messageTimes.length >= RATE_LIMIT_MAX_MESSAGES) {
+      return true;
+    }
+    client.messageTimes.push(now);
+    return false;
+  }
+
   private handleMessage(client: ClientConnection, message: ClientMessage): void {
+    // Rate limiting — drop messages from flooding clients
+    if (this.isRateLimited(client)) {
+      console.warn(`[RATE LIMIT] Client ${client.clientId} exceeded rate limit, dropping message`);
+      return;
+    }
+
     switch (message.type) {
       case 'CREATE_RUN': {
         try {
@@ -120,6 +219,7 @@ export class GameWebSocketServer {
           console.log('[DEBUG] Run created:', result.runId);
           client.playerId = result.playerId;
           client.runId = result.runId;
+          this.addToRunIndex(result.runId, client.ws);
 
           // Initialize crypto state for this run
           initializeCryptoState(result.runId);
@@ -138,18 +238,34 @@ export class GameWebSocketServer {
       }
 
       case 'CREATE_RUN_FROM_SAVE': {
-        const result = gameStateManager.createRunFromSave(message.saveData);
-        client.playerId = result.playerId;
-        client.runId = result.runId;
+        // Validate save data to prevent fabricated characters
+        const validationError = validateSaveData(message.saveData);
+        if (validationError) {
+          console.warn(`[SECURITY] Invalid save data from ${client.clientId}: ${validationError}`);
+          this.send(client.ws, {
+            type: 'ERROR' as any,
+            message: `Invalid save data: ${validationError}`
+          });
+          break;
+        }
 
-        // Initialize crypto state for this run
-        initializeCryptoState(result.runId);
+        try {
+          const result = gameStateManager.createRunFromSave(message.saveData);
+          client.playerId = result.playerId;
+          client.runId = result.runId;
+          this.addToRunIndex(result.runId, client.ws);
 
-        this.send(client.ws, {
-          type: 'RUN_CREATED',
-          runId: result.runId,
-          state: result.state
-        });
+          // Initialize crypto state for this run
+          initializeCryptoState(result.runId);
+
+          this.send(client.ws, {
+            type: 'RUN_CREATED',
+            runId: result.runId,
+            state: result.state
+          });
+        } catch (error) {
+          console.error('[ERROR] Failed to create run from save:', error);
+        }
         break;
       }
 
@@ -418,45 +534,40 @@ export class GameWebSocketServer {
    * - Subsequent updates send only delta (DELTA_UPDATE) for bandwidth savings
    * - Reduces payload from ~10KB to ~500-1000 bytes after initial sync
    */
+  /**
+   * Broadcast state to run with delta optimization.
+   * Uses run-to-client index for O(1) lookup instead of scanning all clients.
+   * Serializes once and sends the raw string to avoid double JSON.stringify.
+   */
   private broadcastStateToRun(runId: string, state: import('@dungeon-link/shared').RunState): void {
-    for (const [ws, client] of this.clients) {
-      if (client.runId === runId) {
-        // Check if client needs full sync (first update or after floor change)
-        if (stateTracker.needsFullSync(client.clientId)) {
-          // Send full state for initial sync
-          const clientState = stateTracker.prepareClientState(client.clientId, state, true);
-          if (clientState !== null) {
-            const payload = JSON.stringify({ type: 'STATE_UPDATE', state: clientState });
-            this.send(ws, {
-              type: 'STATE_UPDATE',
-              state: clientState as import('@dungeon-link/shared').RunState
-            });
-            // Pass state to track initial enemy IDs
-            stateTracker.markFullSyncSent(client.clientId, state);
+    const runWsSet = this.runClients.get(runId);
+    if (!runWsSet || runWsSet.size === 0) return;
 
-            // Track payload sizes
-            this.totalFullSyncBytes += payload.length;
-            this.fullSyncCount++;
-          }
-        } else {
-          // Send delta update (much smaller payload)
-          const clientState = stateTracker.prepareClientState(client.clientId, state);
+    for (const ws of runWsSet) {
+      const client = this.clients.get(ws);
+      if (!client) continue;
 
-          // Only send if state changed
-          if (clientState !== null) {
-            // Pass clientId to detect newly spawned enemies (boss summons, etc.)
-            const delta = stateTracker.generateDeltaState(state, client.clientId);
-            if (delta !== null) {
-              const payload = JSON.stringify({ type: 'DELTA_UPDATE', delta });
-              this.send(ws, {
-                type: 'DELTA_UPDATE',
-                delta
-              });
+      if (stateTracker.needsFullSync(client.clientId)) {
+        const clientState = stateTracker.prepareClientState(client.clientId, state, true);
+        if (clientState !== null) {
+          // Serialize once, send raw string — eliminates double stringify
+          const payload = JSON.stringify({ type: 'STATE_UPDATE', state: clientState });
+          this.sendRaw(ws, payload);
+          stateTracker.markFullSyncSent(client.clientId, state);
 
-              // Track payload sizes
-              this.totalDeltaBytes += payload.length;
-              this.deltaCount++;
-            }
+          this.totalFullSyncBytes += payload.length;
+          this.fullSyncCount++;
+        }
+      } else {
+        const clientState = stateTracker.prepareClientState(client.clientId, state);
+        if (clientState !== null) {
+          const delta = stateTracker.generateDeltaState(state, client.clientId);
+          if (delta !== null) {
+            const payload = JSON.stringify({ type: 'DELTA_UPDATE', delta });
+            this.sendRaw(ws, payload);
+
+            this.totalDeltaBytes += payload.length;
+            this.deltaCount++;
           }
         }
       }
@@ -471,16 +582,34 @@ export class GameWebSocketServer {
     }
   }
 
+  /**
+   * Send a pre-serialized string directly to avoid double JSON.stringify.
+   */
+  private sendRaw(ws: WebSocket, payload: string): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    }
+  }
+
   private send(ws: WebSocket, message: ServerMessage): void {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(message));
     }
   }
 
+  /**
+   * Broadcast a message to all clients in a run.
+   * Uses run-to-client index for O(1) lookup.
+   */
   private broadcastToRun(runId: string, message: ServerMessage, exclude?: WebSocket): void {
-    for (const [ws, client] of this.clients) {
-      if (client.runId === runId && ws !== exclude) {
-        this.send(ws, message);
+    const runWsSet = this.runClients.get(runId);
+    if (!runWsSet || runWsSet.size === 0) return;
+
+    // Serialize once for all recipients
+    const payload = JSON.stringify(message);
+    for (const ws of runWsSet) {
+      if (ws !== exclude) {
+        this.sendRaw(ws, payload);
       }
     }
   }

@@ -1694,3 +1694,434 @@ Arcane Barrier: Spell crits generate 15% shield (max 50% HP, 8s)
 ```
 
 ---
+
+## 19. Patrol Enemy Death UI Bug - Health Bar Remains Visible
+
+### Problem
+When a patrol enemy was killed:
+- The health bar remained visible at full health
+- The sprite disappeared but clicking the area still showed the red target circle
+- The name bar continued showing the enemy at full health
+
+### Root Cause
+Patrol enemies can move between rooms. The delta update system was looking for enemies by `roomId`, but patrol enemies might be in a different room on the client's cached state than where the server placed them:
+
+```typescript
+// BAD: Only searches the room specified in delta
+const room = this.currentState.dungeon.rooms.find(r => r.id === deltaEnemy.roomId);
+const enemy = room?.enemies.find(e => e.id === deltaEnemy.id);
+```
+
+If the client had the patrol cached in `room_A` but the server said it was now in `room_B`, the delta update would fail to find the enemy, and `isAlive: false` was never applied.
+
+### Solution
+Search ALL rooms for the enemy by ID instead of relying on the `roomId` from the delta:
+
+**Files Changed:**
+- `client/src/network/WebSocketClient.ts`
+
+**Key Code:**
+```typescript
+// GOOD: Search ALL rooms for patrol enemies that may have moved
+for (const deltaEnemy of delta.enemies) {
+  let enemyFound = false;
+  for (const room of this.currentState.dungeon.rooms) {
+    const enemy = room.enemies.find(e => e.id === deltaEnemy.id);
+    if (enemy) {
+      // Update all enemy properties including isAlive
+      enemy.position = deltaEnemy.position;
+      enemy.stats.health = deltaEnemy.health;
+      enemy.stats.maxHealth = deltaEnemy.maxHealth;
+      enemy.isAlive = deltaEnemy.isAlive;
+      enemy.targetId = deltaEnemy.targetId;
+      enemy.isHidden = deltaEnemy.isHidden;
+      enemy.debuffs = deltaEnemy.debuffs;
+      enemy.isEnraged = deltaEnemy.isEnraged;
+      enemy.isInvulnerable = deltaEnemy.isInvulnerable;
+      enemy.isRegenerating = deltaEnemy.isRegenerating;
+      enemyFound = true;
+      break;  // Found it, stop searching
+    }
+  }
+}
+```
+
+### Key Invariants
+| Invariant | Why It Matters |
+|-----------|----------------|
+| Search ALL rooms for enemy updates | Patrol enemies move between rooms |
+| Don't rely on delta.roomId for lookups | Client cache may have stale room assignment |
+| Always update isAlive from delta | Health bars need accurate alive state |
+
+---
+
+## 20. Pet Sprites Not Appearing (Totem, Beast Types)
+
+### Problem
+Searing Totem (Shaman ability) and other pet types weren't rendering. The pet was being summoned (server-side logic worked), but no sprite appeared on screen.
+
+### Root Cause
+The pet rendering code only handled 2 of the 4 possible pet types:
+
+```typescript
+// BAD: Only handles imp and voidwalker
+const texture = pet.petType === 'imp' ? 'pet_imp' : 'pet_voidwalker';
+```
+
+Pet types defined in `shared/types.ts`:
+- `'imp'` - Warlock's fire imp (✅ had texture)
+- `'voidwalker'` - Warlock's void pet (✅ had texture)
+- `'beast'` - Hunter companion (❌ no texture, fell through to voidwalker)
+- `'totem'` - Shaman's totem (❌ no texture, fell through to voidwalker)
+
+The fallback to voidwalker technically worked but totems are stationary fire objects that shouldn't look like a voidwalker.
+
+### Solution
+1. Created proper texture mapping for all pet types with fallbacks
+2. Added programmatic totem rendering (procedurally generated sprite)
+
+**Files Changed:**
+- `client/src/scenes/GameScene.ts`
+
+**Key Code (Texture Selection):**
+```typescript
+if (!sprite) {
+  // Handle totem specially - render as programmatic graphic
+  if (pet.petType === 'totem') {
+    sprite = this.createTotemSprite(pet.position.x, pet.position.y);
+  } else {
+    // Use pet-specific textures with fallbacks
+    const petTextures: Record<string, string> = {
+      'imp': 'pet_imp',
+      'voidwalker': 'pet_voidwalker',
+      'beast': 'pet_voidwalker', // fallback to voidwalker
+    };
+    const texture = petTextures[pet.petType] || 'pet_imp';
+    sprite = this.add.sprite(pet.position.x, pet.position.y, texture);
+    sprite.setScale(0.12);
+  }
+  sprite.setDepth(15);
+  this.petSprites.set(pet.id, sprite);
+  // ... rest of sprite setup
+}
+```
+
+**Key Code (Totem Sprite Generation):**
+```typescript
+private createTotemSprite(x: number, y: number): Phaser.GameObjects.Sprite {
+  const totemKey = 'totem_generated';
+
+  // Only create the texture once
+  if (!this.textures.exists(totemKey)) {
+    const graphics = this.make.graphics({ x: 0, y: 0 });
+
+    // Draw totem base (wooden pillar)
+    graphics.fillStyle(0x8B4513, 1); // saddle brown
+    graphics.fillRoundedRect(12, 20, 16, 30, 3);
+
+    // Draw totem top (fire bowl)
+    graphics.fillStyle(0x654321, 1); // darker brown
+    graphics.fillCircle(20, 20, 10);
+
+    // Draw flames (orange-red gradient effect)
+    graphics.fillStyle(0xff4400, 0.9);
+    graphics.fillTriangle(20, 5, 12, 20, 28, 20);
+    graphics.fillStyle(0xff8800, 0.8);
+    graphics.fillTriangle(20, 8, 14, 18, 26, 18);
+    graphics.fillStyle(0xffcc00, 0.7);
+    graphics.fillTriangle(20, 10, 16, 16, 24, 16);
+
+    graphics.generateTexture(totemKey, 40, 50);
+    graphics.destroy();
+  }
+
+  const sprite = this.add.sprite(x, y, totemKey);
+  sprite.setScale(1.0);
+  return sprite;
+}
+```
+
+### Visual Appearance
+| Pet Type | Texture | Description |
+|----------|---------|-------------|
+| `imp` | `pet_imp` (asset) | Fire imp sprite |
+| `voidwalker` | `pet_voidwalker` (asset) | Void creature sprite |
+| `beast` | `pet_voidwalker` (fallback) | Hunter companion |
+| `totem` | Procedural | Brown pillar with orange/yellow flames |
+
+### Adding New Pet Assets
+To add proper assets for `beast` or `totem`:
+1. Add image to `client/public/assets/pets/` (e.g., `beast.png`, `totem.png`)
+2. Load in `BootScene.ts`: `this.load.image('pet_beast', 'assets/pets/beast.png');`
+3. Update texture mapping in `GameScene.ts` `renderPets()` method
+
+---
+
+## 21. Set Item Double Drop Chance Bug
+
+### Problem
+Set items (gear that provides bonuses when multiple pieces are equipped) were dropping at approximately double the intended rate from bosses and rare enemies.
+
+### Root Cause
+The code was calling `shouldDropSetItem()` twice - once to determine drop rate modifier, and again within the actual drop logic:
+
+**Boss Drop Code (BAD):**
+```typescript
+// First call - determines if we should use 2x chance
+if (this.shouldDropSetItem(floor, rng)) {
+  // Second call - checks again with 2x multiplier!
+  if (this.shouldDropSetItem(floor, rng)) {
+    // Drop set item
+  }
+}
+```
+
+Each call to `shouldDropSetItem()` consumed an RNG roll, making the effective chance calculation incorrect.
+
+**Rare Enemy Drop Code (BAD):**
+```typescript
+// Same problem - shouldDropSetItem called twice
+if (this.shouldDropSetItem(floor, rng)) {
+  if (this.shouldDropSetItem(floor, rng)) {
+    // ...
+  }
+}
+```
+
+### Solution
+Use the base drop chance directly with a multiplier instead of calling the function twice:
+
+**Files Changed:**
+- `server/src/game/Loot.ts`
+
+**Key Code (Boss - 2x chance):**
+```typescript
+// FIXED: Use multiplied chance directly
+const baseSetChance = getSetDropChance(floor);
+const bossSetChance = Math.min(baseSetChance * 2, 1.0);  // 2x for bosses, capped at 100%
+const setItemChance = rng.next() < bossSetChance;
+
+if (setItemChance) {
+  // Drop set item
+}
+```
+
+**Key Code (Rare Enemy - 1.5x chance):**
+```typescript
+// FIXED: Use multiplied chance directly
+const baseSetChance = getSetDropChance(floor);
+const rareSetChance = Math.min(baseSetChance * 1.5, 1.0);  // 1.5x for rare enemies
+const setChance = rng.next() < rareSetChance;
+
+if (setChance) {
+  // Drop set item
+}
+```
+
+### Drop Rate Comparison
+| Source | Floor 5 (Before) | Floor 5 (After) | Floor 10 (Before) | Floor 10 (After) |
+|--------|------------------|-----------------|-------------------|------------------|
+| Boss | ~36% | ~20% | ~56% | ~30% |
+| Rare Enemy | ~22.5% | ~15% | ~33.75% | ~22.5% |
+
+---
+
+## 22. Item Stat Generation Bias
+
+### Problem
+Item stat selection was biased toward certain stats. When generating item stats, the shuffling algorithm wasn't uniform.
+
+### Root Cause
+The code used a comparison-based sort with random values, which produces biased results:
+
+```typescript
+// BAD: Sort-based shuffle is NOT uniform
+const shuffled = [...availableStats].sort(() => rng.next() - 0.5);
+```
+
+This approach has well-documented bias because:
+1. The sort comparison function is called inconsistently across different array sizes
+2. The `0.5` threshold doesn't account for sort algorithm internals
+3. Some elements have higher probability of ending up in certain positions
+
+### Solution
+Use the proper Fisher-Yates shuffle algorithm via the existing `rng.shuffle()` method:
+
+**Files Changed:**
+- `server/src/data/items.ts`
+
+**Key Code:**
+```typescript
+// GOOD: Fisher-Yates shuffle (uniform distribution)
+const shuffled = rng.shuffle(availableStats);
+const selectedStats = shuffled.slice(0, numStats);
+```
+
+The `SeededRNG.shuffle()` method implements the Fisher-Yates algorithm:
+```typescript
+// From SeededRNG class
+shuffle<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = this.nextInt(0, i);
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+```
+
+### Why Fisher-Yates?
+| Shuffle Method | Distribution | Time Complexity |
+|----------------|--------------|-----------------|
+| Sort-based (`sort(() => random - 0.5)`) | Biased | O(n log n) |
+| Fisher-Yates | Uniform | O(n) |
+
+Fisher-Yates guarantees each permutation has equal probability (1/n! for n elements).
+
+---
+
+## 23. WebSocket Connection State Machine (Feb 8)
+
+### Problem
+WebSocketClient had no formal state machine, causing:
+- **Double-reconnect loops**: Both `onerror` and `onclose` fire on connection failure, each triggering `attemptReconnect()`, creating two competing reconnect loops
+- **Zombie sockets**: Intentional `disconnect()` could still trigger `onclose` → reconnect
+- **Stale state after reconnect**: `runId`, `playerId`, and `currentState` survived reconnection even though the server lost the run
+
+### Fix
+Added a 4-state connection state machine: `DISCONNECTED → CONNECTING → CONNECTED → RECONNECTING`
+
+**Key changes in `client/src/network/WebSocketClient.ts`:**
+- `ConnectionState` type with guarded transitions
+- `intentionalDisconnect` flag prevents reconnect after user-initiated disconnect
+- `settled` flag in `connect()` prevents `onerror`+`onclose` double-fire
+- `disconnect()` nulls `ws.onclose/onerror/onmessage` before calling `ws.close()`
+- `attemptReconnect()` clears `runId`, `playerId`, `currentState` since server lost the run
+
+### State hash improvement
+`computeStateHash()` now includes equipment IDs, buff IDs, ability ranks, boss flags (isEnraged, isInvulnerable), and chest states for better dedup.
+
+---
+
+## 24. TOCTOU Race in returnToMenu (Feb 8)
+
+### Problem
+In `main.ts`, `returnToMenu()` called `disconnect()` before `clearAllHandlers()`. Between these two calls, queued `onmessage` events could fire and call into half-destroyed scene objects.
+
+### Fix
+Reversed cleanup order:
+```typescript
+// BEFORE (race-prone):
+wsClient.disconnect();
+wsClient.clearAllHandlers();
+
+// AFTER (safe):
+wsClient.clearAllHandlers();  // Prevent any queued messages from being handled
+wsClient.disconnect();         // Now safe to close the socket
+```
+
+---
+
+## 25. BootScene Infinite Reconnect Loop (Feb 8)
+
+### Problem
+`BootScene.connectToServer()` was recursive with no attempt counter. If the server was unreachable, it would retry forever, competing with `WebSocketClient`'s own reconnect logic.
+
+### Fix
+Added `MAX_BOOT_CONNECT_ATTEMPTS = 10` counter. Shows attempt count in UI and gives up after 10 failures with a clear error message.
+
+---
+
+## 26. Server Save Data Validation (Feb 8)
+
+### Problem
+`CREATE_RUN_FROM_SAVE` accepted any data from the client without validation. A malicious client could fabricate a level 50 character with 99999 gold.
+
+### Fix
+Added `validateSaveData()` in `WebSocketServer.ts` with checks for:
+- `playerName`: string, 1-30 chars
+- `classId`: must be one of 9 valid classes
+- `level`: 1-50
+- `gold`: 0-99999
+- `highestFloor`: 1-30
+- `abilities`: max 10
+- `backpack`: max 20
+- `xp`: non-negative
+- `lives`: 0-5 (optional)
+
+---
+
+## 27. Server Rate Limiting (Feb 8)
+
+### Problem
+No rate limiting on WebSocket messages. A malicious client could flood the server.
+
+### Fix
+Added sliding window rate limiter: 60 messages per second per client. Excess messages are silently dropped with a warning log.
+
+---
+
+## 28. Crypto Transaction Verification (Feb 8)
+
+### Problem
+`handleVerifyCryptoPurchase` was granting items without verifying the transaction on-chain.
+
+### Fix
+Enabled `getTransactionReceipt` verification and added txHash format validation (`/^0x[0-9a-fA-F]{64}$/`).
+
+---
+
+## 29. O(1) Broadcast with Run-Client Index (Feb 8)
+
+### Problem
+`broadcastToRun()` iterated over ALL connected clients to find those in a specific run — O(n) for every broadcast on every tick.
+
+### Fix
+Added `runClients: Map<string, Set<WebSocket>>` index. Updated `addToRunIndex()`/`removeFromRunIndex()` on join/leave. Broadcast now does O(1) lookup.
+
+Also eliminated double `JSON.stringify` — messages are now serialized once and sent via `sendRaw()`.
+
+---
+
+## 30. Tracking Map Memory Leaks on Floor Advance (Feb 8)
+
+### Problem
+`advanceFloor()` only cleared 3 of 15 tracking Maps (`enemyAggroTimes`, `bossAbilityCooldowns`, `bossAoECooldowns`). The other 12 Maps accumulated stale entity IDs from previous floors.
+
+### Fix
+Now clears all enemy-related tracking Maps on floor advance:
+`attackCooldowns`, `eliteAttackCooldowns`, `groundEffectDamageTicks`, `enemyLeashTimers`, `enemyCharging`, `enemyChargeCooldowns`, `ambushTriggered`, `modifierDamageTicks`, `bossPhaseTriggered`, `bossFightStartTimes`, `playerMomentum`
+
+Intentionally preserves `playerMovement` and `playerDeathTimes` (needed across transitions).
+
+---
+
+## 31. pendingBossPhaseEvents Leak in removePlayer (Feb 8)
+
+### Problem
+`removePlayer()` deleted the run from `runs`, `playerToRun`, and `lastUpdate` but forgot `pendingBossPhaseEvents`, causing the Map to grow indefinitely.
+
+### Fix
+Added `this.pendingBossPhaseEvents.delete(runId)` in `removePlayer()`.
+
+---
+
+## 32. setInterval Leak in Boss Shield Animation (Feb 8)
+
+### Problem
+Boss shield pulse animation used raw `setInterval` at line 6247. If the scene shut down before the 5-second timer cleared the interval, it would leak and keep firing against destroyed objects.
+
+### Fix
+Added `activeIntervals: ReturnType<typeof setInterval>[]` property. Intervals are registered when created and cleared in `shutdown()`.
+
+---
+
+## 33. Sprite Leak in GameScene shutdown() (Feb 8)
+
+### Problem
+`shutdown()` called `.clear()` on room cache Maps (`roomTiles`, `roomDecorations`, `roomWalls`, `roomModifierOverlays`, `corridorElements`) without destroying the Phaser game objects inside them. Also didn't clear entity sprite Maps (`playerSprites`, `enemySprites`, etc.).
+
+### Fix
+Now calls `.destroy()` on each object before `.clear()`. Also clears all entity sprite Maps in shutdown.
+
+---

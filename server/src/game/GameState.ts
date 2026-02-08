@@ -219,6 +219,7 @@ export class GameStateManager {
     this.playerToRun.delete(playerId);
     this.runs.delete(runId);
     this.lastUpdate.delete(runId);
+    this.pendingBossPhaseEvents.delete(runId);
   }
 
   /**
@@ -3440,12 +3441,21 @@ export class GameStateManager {
 
     if (!state.dungeon.bossDefeated) return null;
 
-    // Clear all aggro times for new floor
+    // Clear all enemy-related tracking for new floor (prevents memory leaks from stale entity IDs)
     state.tracking.enemyAggroTimes.clear();
-
-    // Clear boss cooldowns from previous floor (new bosses will get fresh staggered cooldowns)
+    state.tracking.attackCooldowns.clear();
+    state.tracking.eliteAttackCooldowns.clear();
     state.tracking.bossAbilityCooldowns.clear();
     state.tracking.bossAoECooldowns.clear();
+    state.tracking.groundEffectDamageTicks.clear();
+    state.tracking.enemyLeashTimers.clear();
+    state.tracking.enemyCharging.clear();
+    state.tracking.enemyChargeCooldowns.clear();
+    state.tracking.ambushTriggered.clear();
+    state.tracking.modifierDamageTicks.clear();
+    state.tracking.bossPhaseTriggered.clear();
+    state.tracking.bossFightStartTimes.clear();
+    state.tracking.playerMomentum.clear();
 
     // Increment floor
     state.floor++;

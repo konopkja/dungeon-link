@@ -395,11 +395,12 @@ function returnToMenu(): void {
   if (menuOverlay) menuOverlay.classList.remove('active');
 
   // CRITICAL: Full WebSocket cleanup before destroying the game
-  // 1. Disconnect to stop receiving messages from old run
-  // 2. Clear all handlers to prevent accumulation
-  // 3. Clear state to prevent old dungeon from rendering
-  wsClient.disconnect();
+  // Order matters! Clear handlers FIRST to prevent TOCTOU race where
+  // queued onmessage events fire between disconnect and handler clearing,
+  // calling into half-destroyed scene objects.
+  // See docs/BUG_FIXES_2026_02.md "TOCTOU Race in returnToMenu" for context.
   wsClient.clearAllHandlers();
+  wsClient.disconnect();
   wsClient.runId = null;
   wsClient.playerId = null;
   wsClient.currentState = null;

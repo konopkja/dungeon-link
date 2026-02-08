@@ -230,16 +230,18 @@ export async function handleVerifyCryptoPurchase(
     return;
   }
 
-  // In production, verify the transaction on-chain
-  // For now, we trust the client and create the potion
-  // TODO: Implement actual on-chain verification
-
+  // Verify the transaction on-chain before granting items
   try {
-    // Verify transaction exists and is confirmed
-    // const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
-    // if (!receipt || receipt.status !== 'success') {
-    //   throw new Error('Transaction not confirmed');
-    // }
+    // Validate txHash format
+    if (!txHash || typeof txHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+      throw new Error('Invalid transaction hash format');
+    }
+
+    // Verify transaction exists and is confirmed on Base
+    const receipt = await publicClient.getTransactionReceipt({ hash: txHash as `0x${string}` });
+    if (!receipt || receipt.status !== 'success') {
+      throw new Error('Transaction not confirmed or failed');
+    }
 
     // Create the potion with random quality
     const potion = createCryptoPotion(potionType);

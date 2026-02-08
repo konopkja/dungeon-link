@@ -393,12 +393,19 @@ export class BootScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Connect to the WebSocket server.
+   * Retries are handled here (not in WebSocketClient) to show UI feedback.
+   * WebSocketClient's internal reconnect is only for mid-game disconnects.
+   */
+  private connectAttempts = 0;
+  private readonly MAX_BOOT_CONNECT_ATTEMPTS = 10;
+
   private async connectToServer(): Promise<void> {
     try {
       await wsClient.connect();
+      this.connectAttempts = 0;
       this.statusText?.setText('Connected!');
-
-      // NOTE: URL join parameter removed - game is now single-player only
 
       // Short delay then go to menu
       this.time.delayedCall(500, () => {
@@ -406,7 +413,13 @@ export class BootScene extends Phaser.Scene {
         this.scene.stop('BootScene');
       });
     } catch (error) {
-      this.statusText?.setText('Failed to connect. Retrying...');
+      this.connectAttempts++;
+      if (this.connectAttempts >= this.MAX_BOOT_CONNECT_ATTEMPTS) {
+        this.statusText?.setText('Unable to connect. Please refresh.');
+        return;
+      }
+      this.statusText?.setText(`Failed to connect. Retrying (${this.connectAttempts}/${this.MAX_BOOT_CONNECT_ATTEMPTS})...`);
+      // Linear 2s retry — WebSocketClient won't auto-reconnect for initial connection failures
       this.time.delayedCall(2000, () => this.connectToServer());
     }
   }

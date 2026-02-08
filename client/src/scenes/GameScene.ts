@@ -139,6 +139,9 @@ export class GameScene extends Phaser.Scene {
   private connectUnsubscribe: (() => void) | null = null;
   private disconnectIndicator: Phaser.GameObjects.Container | null = null;
 
+  // Track raw intervals so we can clear them on shutdown
+  private activeIntervals: ReturnType<typeof setInterval>[] = [];
+
   // Lives tracking
   private wasAlive: boolean = true;
   private livesText: Phaser.GameObjects.Text | null = null;
@@ -4327,11 +4330,21 @@ export class GameScene extends Phaser.Scene {
       let sprite = this.petSprites.get(pet.id);
 
       if (!sprite) {
-        // Use pet-specific textures
-        const texture = pet.petType === 'imp' ? 'pet_imp' : 'pet_voidwalker';
-        sprite = this.add.sprite(pet.position.x, pet.position.y, texture);
+        // Handle totem specially - render as programmatic graphic
+        if (pet.petType === 'totem') {
+          sprite = this.createTotemSprite(pet.position.x, pet.position.y);
+        } else {
+          // Use pet-specific textures with fallbacks
+          const petTextures: Record<string, string> = {
+            'imp': 'pet_imp',
+            'voidwalker': 'pet_voidwalker',
+            'beast': 'pet_voidwalker', // fallback to voidwalker
+          };
+          const texture = petTextures[pet.petType] || 'pet_imp';
+          sprite = this.add.sprite(pet.position.x, pet.position.y, texture);
+          sprite.setScale(0.12); // Scale down pet images (~40px tall from 330px)
+        }
         sprite.setDepth(15);
-        sprite.setScale(0.12); // Scale down pet images (~40px tall from 330px)
         this.petSprites.set(pet.id, sprite);
 
         // Check if this is a new pet (just summoned)
@@ -4370,6 +4383,44 @@ export class GameScene extends Phaser.Scene {
         this.knownPetIds.delete(id);
       }
     }
+  }
+
+  /**
+   * Create a programmatic totem sprite (fire pillar visual)
+   * Used for Shaman's Searing Totem since it doesn't have a sprite asset
+   */
+  private createTotemSprite(x: number, y: number): Phaser.GameObjects.Sprite {
+    // Create a render texture for the totem
+    const totemKey = 'totem_generated';
+
+    // Only create the texture once
+    if (!this.textures.exists(totemKey)) {
+      const graphics = this.make.graphics({ x: 0, y: 0 });
+
+      // Draw totem base (wooden pillar)
+      graphics.fillStyle(0x8B4513, 1); // saddle brown
+      graphics.fillRoundedRect(12, 20, 16, 30, 3);
+
+      // Draw totem top (fire bowl)
+      graphics.fillStyle(0x654321, 1); // darker brown
+      graphics.fillCircle(20, 20, 10);
+
+      // Draw flames (orange-red gradient effect)
+      graphics.fillStyle(0xff4400, 0.9);
+      graphics.fillTriangle(20, 5, 12, 20, 28, 20);
+      graphics.fillStyle(0xff8800, 0.8);
+      graphics.fillTriangle(20, 8, 14, 18, 26, 18);
+      graphics.fillStyle(0xffcc00, 0.7);
+      graphics.fillTriangle(20, 10, 16, 16, 24, 16);
+
+      // Generate texture from graphics
+      graphics.generateTexture(totemKey, 40, 50);
+      graphics.destroy();
+    }
+
+    const sprite = this.add.sprite(x, y, totemKey);
+    sprite.setScale(1.0); // Totem is already small
+    return sprite;
   }
 
   private renderVendors(rooms: Room[]): void {
@@ -6202,10 +6253,12 @@ export class GameScene extends Phaser.Scene {
       if (pulseAlpha >= 0.8) pulseDirection = -1;
       drawShield(pulseAlpha);
     }, 50);
+    this.activeIntervals.push(pulseInterval);
 
     // Remove shield after 5 seconds
     this.time.delayedCall(5000, () => {
       clearInterval(pulseInterval);
+      this.activeIntervals = this.activeIntervals.filter(id => id !== pulseInterval);
       this.tweens.add({
         targets: shield,
         alpha: 0,
@@ -8289,6 +8342,12 @@ export class GameScene extends Phaser.Scene {
       this.connectUnsubscribe = null;
     }
 
+    // Clear any raw intervals (e.g. boss shield pulse)
+    for (const id of this.activeIntervals) {
+      clearInterval(id);
+    }
+    this.activeIntervals = [];
+
     // Stop all tweens to prevent visual artifacts on scene restart
     this.tweens.killAll();
 
@@ -8299,17 +8358,30 @@ export class GameScene extends Phaser.Scene {
     // CRITICAL: Without this, Q/E/I key handlers accumulate on scene restart
     this.input.keyboard?.removeAllListeners();
 
-    // CRITICAL: Clear room caches to prevent stale dungeon rendering on scene restart
-    // This ensures that when a new game starts, rooms are recreated from fresh server state
+    // CRITICAL: Destroy all cached room objects then clear Maps to prevent memory leaks
     // Bug fix: Without this, leaving game A and starting game B could show game A's rooms
+    this.roomTiles.forEach(tile => tile?.destroy());
     this.roomTiles.clear();
+    this.roomDecorations.forEach(decs => decs?.forEach(d => d?.destroy()));
     this.roomDecorations.clear();
+    this.roomWalls.forEach(walls => walls?.forEach(w => w?.destroy()));
     this.roomWalls.clear();
+    this.roomModifierOverlays.forEach(overlay => overlay?.destroy());
     this.roomModifierOverlays.clear();
+    this.corridorElements.forEach(elements => elements?.forEach(e => e?.destroy()));
     this.corridorElements.clear();
     this._activeRoomIds.clear();
 
-    console.log('[DEBUG] GameScene shutdown() complete - room caches cleared');
+    // Clear entity sprite Maps (sprites themselves are destroyed by children.removeAll or game.destroy)
+    this.playerSprites.clear();
+    this.enemySprites.clear();
+    this.petSprites.clear();
+    this.groundItemSprites.clear();
+    this.trapSprites.clear();
+    this.chestSprites.clear();
+    this.vendorSprites.clear();
+
+    console.log('[DEBUG] GameScene shutdown() complete - all caches cleared');
 
     // Destroy systems
     this.inputManager?.destroy();

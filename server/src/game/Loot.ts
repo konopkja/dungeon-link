@@ -5,7 +5,7 @@ import { getBossById } from '../data/bosses.js';
 import { generateItem, pickRarityFromWeights } from '../data/items.js';
 import { getLearnableAbilities, getClassById } from '../data/classes.js';
 import { canUpgradeAbilityRank, getFallbackReward } from '../data/scaling.js';
-import { shouldDropSetItem, generateSetItem, calculateSetBonuses } from '../data/sets.js';
+import { shouldDropSetItem, generateSetItem, calculateSetBonuses, getSetDropChance } from '../data/sets.js';
 
 /**
  * Generate loot drops for a defeated boss
@@ -73,7 +73,10 @@ export function generateBossLoot(
     }
 
     // Check for set item drop (bosses have 2x chance + kill time bonus)
-    const setItemChance = shouldDropSetItem(rng, floor) || shouldDropSetItem(rng, floor);
+    // Fixed: Use doubled chance directly instead of calling twice (which wasted RNG and had incorrect probability)
+    const baseSetChance = getSetDropChance(floor);
+    const bossSetChance = Math.min(baseSetChance * 2, 1.0); // 2x chance for bosses, capped at 100%
+    const setItemChance = rng.next() < bossSetChance;
     const bonusSetChance = killTimeBonus > 0 && rng.chance(killTimeBonus * 2);
     if (setItemChance || bonusSetChance) {
       const setItem = generateSetItem(rng, floor);
@@ -136,9 +139,11 @@ export function generateRareLoot(
     }
 
     // Check for set item drop (rares have 1.5x chance)
-    const setChance = shouldDropSetItem(rng, floor);
-    const bonusSetChance = rng.chance(0.5) && shouldDropSetItem(rng, floor);
-    if (setChance || bonusSetChance) {
+    // Fixed: Use multiplied chance directly instead of calling twice
+    const baseSetChance = getSetDropChance(floor);
+    const rareSetChance = Math.min(baseSetChance * 1.5, 1.0); // 1.5x chance for rares
+    const setChance = rng.next() < rareSetChance;
+    if (setChance) {
       const setItem = generateSetItem(rng, floor);
       loot.push({ type: 'item', item: setItem });
     }
